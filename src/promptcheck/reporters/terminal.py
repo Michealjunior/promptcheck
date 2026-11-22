@@ -106,8 +106,9 @@ class TerminalReporter:
         title = self.style(f"promptcheck {__version__}", "bold")
         meta = dot.join(x for x in (run_suite_name, provider, model) if x)
         self.write(f"{title}{dot}{meta}")
-        noun = "case" if cases == 1 else "cases"
-        self.write(self.style(f"{cases} {noun}, {samples} samples", "dim"))
+        case_noun = "case" if cases == 1 else "cases"
+        sample_noun = "sample" if samples == 1 else "samples"
+        self.write(self.style(f"{cases} {case_noun}, {samples} {sample_noun}", "dim"))
         self.write()
 
     def report(
@@ -123,7 +124,7 @@ class TerminalReporter:
         self._summary(run, min_pass_rate)
         if outputs and not self.quiet:
             for label, path in outputs.items():
-                self.write(self.style(f"  {label:<9}{path}", "dim"))
+                self.write(self.style(f"  {label:<11}{path}", "dim"))
 
     def _badge(self, status: str) -> str:
         text = {PASS: " PASS ", FAIL: " FAIL ", ERROR: " ERR  "}[status]

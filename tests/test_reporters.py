@@ -197,6 +197,16 @@ def test_terminal_plain_output(example_run):
     assert "reports/report.html" in out
 
 
+def test_terminal_header_pluralises():
+    stream = io.StringIO()
+    reporter = TerminalReporter(stream, color=False)
+    reporter.header("Suite", "replay", None, 1, 1)
+    reporter.header("Suite", "replay", "m", 2, 5)
+    out = stream.getvalue()
+    assert "1 case, 1 sample\n" in out
+    assert "2 cases, 5 samples\n" in out
+
+
 def test_terminal_colour_and_quiet(example_run):
     coloured = io.StringIO()
     TerminalReporter(coloured, color=True).report(example_run)

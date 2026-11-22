@@ -44,6 +44,12 @@ class AnthropicProvider(Provider):
             )
 
     @property
+    def label(self) -> str:
+        if self.base_url != DEFAULT_BASE_URL:
+            return f"anthropic ({self.base_url})"
+        return "anthropic"
+
+    @property
     def url(self) -> str:
         return f"{self.base_url}/v1/messages"
 

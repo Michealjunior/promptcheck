@@ -266,6 +266,8 @@ def test_anthropic_custom_key_env_and_base_url(opener):
     )
     provider.complete(request())
     assert opener.requests[0].full_url == "https://gateway.test/anthropic/v1/messages"
+    assert provider.label == "anthropic (https://gateway.test/anthropic)"
+    assert AnthropicProvider(environ={"ANTHROPIC_API_KEY": KEY}).label == "anthropic"
 
 
 def test_anthropic_missing_key():

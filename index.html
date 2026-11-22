@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>promptcheck · Regression tests for LLM prompts</title>
+<meta name="description" content="promptcheck is an open-source CLI that runs regression tests for LLM prompts. Write expectations in YAML, test against OpenAI-compatible APIs or Anthropic, and replay recorded outputs in CI for free.">
+<meta name="theme-color" content="#04070a">
+<link rel="canonical" href="https://michealjunior.github.io/promptcheck/">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="promptcheck">
+<meta property="og:title" content="promptcheck · Regression tests for LLM prompts">
+<meta property="og:description" content="Catch silent breakage before your users do. YAML test suites for prompts, replayable in CI, with JUnit, Markdown and HTML reports.">
+<meta property="og:url" content="https://michealjunior.github.io/promptcheck/">
+<meta property="og:image" content="https://michealjunior.github.io/promptcheck/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="promptcheck: regression tests for LLM prompts">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root {
+  --bg: #04070a; --card: #0a1218; --raised: #0f1a22; --line: rgba(0, 255, 157, 0.14);
+  --line-soft: rgba(214, 228, 236, 0.08); --text: #d6e4ec; --muted: #8193a3; --accent: #00ff9d;
+  --accent-soft: rgba(0, 255, 157, 0.1); --cyan: #00e1ff; --fail: #ff2e88; --fail-text: #ff8fbf;
+  --warn: #ffc857; --radius: 18px; --radius-sm: 14px;
+  --font-head: "Chakra Petch", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+body {
+  margin: 0; background-color: var(--bg); color: var(--text); font: 16px/1.65 var(--font-body);
+  background-image:
+    radial-gradient(1100px 520px at 85% -8%, rgba(0, 225, 255, 0.09), transparent 62%),
+    radial-gradient(900px 480px at -5% 0%, rgba(0, 255, 157, 0.08), transparent 60%),
+    linear-gradient(rgba(0, 255, 157, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 255, 157, 0.03) 1px, transparent 1px);
+  background-size: auto, auto, 44px 44px, 44px 44px;
+  background-repeat: no-repeat, no-repeat, repeat, repeat;
+}
+img { max-width: 100%; height: auto; display: block; }
+a { color: var(--cyan); text-underline-offset: 3px; }
+a:hover { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+.skip { position: absolute; left: 16px; top: -48px; padding: 8px 14px; border-radius: 999px;
+  background: var(--accent); color: var(--bg); font-weight: 600; text-decoration: none; z-index: 10; }
+.skip:focus { top: 12px; color: var(--bg); }
+.wrap { width: min(1160px, 100% - 32px); margin: 0 auto; }
+h1, h2, h3 { font-family: var(--font-head); margin: 0; letter-spacing: 0; color: #eef6fa; }
+p { margin: 0; }
+code, pre, kbd { font-family: var(--font-mono); font-variant-ligatures: none; }
+
+/* nav */
+.nav { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 0; }
+.brand { display: inline-flex; align-items: center; gap: 10px; color: #eef6fa; text-decoration: none;
+  font: 700 20px/1 var(--font-head); }
+.brand:hover { color: #eef6fa; }
+.nav ul { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.nav li a:not(.btn) { display: inline-block; padding: 8px 12px; border-radius: 999px; color: var(--muted);
+  text-decoration: none; font-size: 14.5px; font-weight: 500; }
+.nav li a:not(.btn):hover { color: var(--text); background: rgba(214, 228, 236, 0.05); }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px;
+  padding: 10px 20px; border-radius: 999px; font: 600 15px/1.2 var(--font-body); text-decoration: none;
+  border: 1px solid transparent; cursor: pointer; transition: transform 0.15s ease, background 0.15s ease; }
+.btn svg { width: 18px; height: 18px; flex: none; }
+.btn-primary { background: var(--accent); color: var(--bg); }
+.btn-primary:hover { background: #5cffbf; color: var(--bg); transform: translateY(-1px); }
+.btn-ghost { border-color: var(--line); color: var(--text); background: rgba(10, 18, 24, 0.6); }
+.btn-ghost:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-1px); }
+.btn-sm { min-height: 38px; padding: 8px 16px; font-size: 14px; }
+
+/* hud */
+.kicker { color: var(--accent); font: 600 12.5px/1.4 var(--font-mono); letter-spacing: 0.12em;
+  text-transform: uppercase; margin-bottom: 14px; }
+.hud { position: relative; }
+.hud::before, .hud::after { content: ""; position: absolute; width: 16px; height: 16px; pointer-events: none;
+  border: 0 solid var(--accent); opacity: 0.8; }
+.hud::before { top: 10px; left: 10px; border-top-width: 2px; border-left-width: 2px; }
+.hud::after { right: 10px; bottom: 10px; border-right-width: 2px; border-bottom-width: 2px; }
+
+/* hero */
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr); gap: 48px; align-items: center;
+  padding: 56px 0 72px; }
+.hero h1 { font-size: clamp(40px, 5.6vw, 66px); line-height: 1.02; font-weight: 700; }
+.hero h1 span { color: var(--accent); }
+.lede { margin-top: 20px; font-size: 19px; color: var(--text); max-width: 34ch; }
+.sub { margin-top: 12px; color: var(--muted); max-width: 52ch; }
+.install { display: flex; align-items: center; gap: 4px; margin-top: 28px; padding: 6px 6px 6px 16px;
+  border-radius: 999px; background: var(--card); border: 1px solid var(--line); max-width: 100%; }
+.install code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 14px; color: #cfe0e8;
+  scrollbar-width: none; }
+.install code::-webkit-scrollbar { display: none; }
+.install code .prompt { color: var(--accent); user-select: none; }
+.copy { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 14px;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--raised); color: var(--text);
+  font: 600 13px/1 var(--font-body); cursor: pointer; }
+.copy:hover { border-color: var(--accent); color: var(--accent); }
+.copy svg { width: 15px; height: 15px; }
+.no-js .copy { display: none; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 22px; }
+
+.terminal { border-radius: var(--radius); background: #060b0f; border: 1px solid var(--line);
+  box-shadow: 0 30px 80px -30px rgba(0, 255, 157, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.4); overflow: hidden; }
+.term-bar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line-soft);
+  background: var(--card); }
+.term-bar i { width: 10px; height: 10px; border-radius: 50%; background: #22313b; }
+.term-bar span { margin-left: 8px; color: var(--muted); font: 500 12px/1 var(--font-mono); }
+.terminal pre { margin: 0; padding: 18px 20px 20px; overflow-x: auto; font-size: 12.5px; line-height: 1.75;
+  color: #b9cad4; }
+.t-dim { color: #627585; } .t-cmd { color: #eef6fa; } .t-acc { color: var(--accent); }
+.t-pass { color: #04070a; background: var(--accent); font-weight: 700; padding: 0 4px; border-radius: 3px; }
+.t-fail { color: #fff; background: var(--fail); font-weight: 700; padding: 0 4px; border-radius: 3px; }
+.t-red { color: var(--fail-text); } .t-bold { color: #eef6fa; font-weight: 700; }
+.t-verdict { color: var(--fail-text); font-weight: 700; }
+.caption { margin-top: 10px; color: var(--muted); font-size: 13px; text-align: right; }
+
+/* sections */
+section.block { padding: 72px 0; border-top: 1px solid var(--line-soft); }
+.section-head { max-width: 720px; margin-bottom: 36px; }
+.section-head h2 { font-size: clamp(30px, 3.6vw, 42px); line-height: 1.1; }
+.section-head p:not(.kicker) { margin-top: 14px; color: var(--muted); font-size: 17px; }
+
+.grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.card { padding: 24px; border-radius: var(--radius); background: var(--card); border: 1px solid var(--line-soft);
+  min-width: 0; display: flex; flex-direction: column; }
+.grid-4 .card p { flex-grow: 1; }
+.card h3 { font-size: 20px; font-weight: 600; }
+.card p { margin-top: 8px; color: var(--muted); font-size: 15px; }
+.card .tag { display: inline-block; margin-bottom: 14px; color: var(--fail-text); font: 600 11.5px/1.4 var(--font-mono);
+  letter-spacing: 0.1em; text-transform: uppercase; }
+.card .fix { display: block; margin-top: 16px; padding: 10px 12px; border-radius: 10px; background: var(--bg);
+  border: 1px solid var(--line); color: var(--accent); font-size: 12.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.card .fix::before { content: "catch it with"; display: block; color: var(--muted); font: 500 11px/1.6 var(--font-mono);
+  letter-spacing: 0.08em; text-transform: uppercase; }
+
+.steps { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 40px; align-items: start; }
+.step-list { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+.step-list li { counter-increment: step; position: relative; padding: 20px 22px 20px 70px; border-radius: var(--radius-sm);
+  background: var(--card); border: 1px solid var(--line-soft); }
+.step-list li::before { content: "0" counter(step); position: absolute; left: 22px; top: 20px;
+  color: var(--accent); font: 700 20px/1.3 var(--font-head); }
+.step-list h3 { font-size: 18px; font-weight: 600; }
+.step-list p { margin-top: 6px; color: var(--muted); font-size: 15px; }
+.step-list code { color: var(--cyan); font-size: 13.5px; }
+
+.code { border-radius: var(--radius); background: #060b0f; border: 1px solid var(--line); overflow: hidden; min-width: 0; }
+.code-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px;
+  border-bottom: 1px solid var(--line-soft); background: var(--card); color: var(--muted);
+  font: 500 12.5px/1.4 var(--font-mono); }
+.code pre { margin: 0; padding: 18px 20px; overflow-x: auto; font-size: 13px; line-height: 1.7; color: #b9cad4; }
+.y-k { color: var(--cyan); } .y-s { color: #9ff5c9; } .y-c { color: #5d7181; font-style: italic; }
+.y-n { color: var(--warn); } .y-p { color: #627585; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.chips li { padding: 8px 14px; border-radius: 999px; background: var(--card); border: 1px solid var(--line);
+  font: 500 13.5px/1.2 var(--font-mono); color: var(--text); }
+.chips li b { color: var(--accent); font-weight: 600; }
+.note { margin-top: 18px; color: var(--muted); font-size: 14.5px; }
+.inline-fail { color: var(--fail-text); white-space: nowrap; font-size: 0.92em; }
+
+.provider h3 { display: flex; align-items: center; gap: 10px; }
+.provider .dot { width: 10px; height: 10px; border-radius: 2px; background: var(--accent); flex: none; }
+.provider:nth-child(2) .dot { background: var(--cyan); }
+.provider:nth-child(3) .dot { background: var(--warn); }
+.provider ul { margin: 14px 0 0; padding: 0; list-style: none; display: grid; gap: 6px; color: var(--muted);
+  font-size: 14.5px; }
+.provider li::before { content: "› "; color: var(--accent); }
+
+.ci { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 48px; align-items: center; }
+.checklist { margin: 0; padding: 0; list-style: none; display: grid; gap: 14px; }
+.checklist li { padding-left: 30px; position: relative; color: var(--muted); }
+.checklist li::before { content: ""; position: absolute; left: 0; top: 6px; width: 16px; height: 16px; border-radius: 4px;
+  background: var(--accent-soft); border: 1px solid var(--accent); }
+.checklist li::after { content: ""; position: absolute; left: 5px; top: 9px; width: 6px; height: 8px;
+  border: solid var(--accent); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.checklist strong { color: var(--text); font-weight: 600; }
+
+.report { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.7fr); gap: 40px; align-items: center; }
+.shot { display: block; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line);
+  box-shadow: 0 30px 80px -40px rgba(0, 225, 255, 0.25); transition: transform 0.2s ease, border-color 0.2s ease; }
+.shot:hover { transform: translateY(-2px); border-color: var(--accent); }
+.report p:not(.kicker) { color: var(--muted); }
+.report .cta { margin-top: 24px; }
+
+footer { margin-top: 24px; padding: 32px 0 40px; border-top: 1px solid var(--line-soft); color: var(--muted); font-size: 14.5px; }
+.foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; }
+.foot nav { display: flex; flex-wrap: wrap; gap: 6px 20px; }
+.foot a { color: var(--text); text-decoration: none; }
+.foot a:hover { color: var(--accent); text-decoration: underline; }
+.foot .built a { color: var(--accent); }
+
+@media (max-width: 1023px) {
+  .hero { grid-template-columns: minmax(0, 1fr); gap: 40px; padding: 40px 0 56px; }
+  .lede { max-width: none; }
+  .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .steps, .ci, .report { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+}
+@media (max-width: 900px) {
+  .grid-3 { grid-template-columns: minmax(0, 1fr); }
+  .provider { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto 1fr;
+    gap: 4px 24px; align-items: start; }
+  .provider h3, .provider > p { grid-column: 1; }
+  .provider ul { grid-column: 2; grid-row: 1 / span 2; margin-top: 4px; }
+}
+@media (max-width: 760px) {
+  .nav ul .hide-sm { display: none; }
+}
+@media (max-width: 560px) {
+  .provider { display: flex; }
+  .provider ul { margin-top: 14px; }
+}
+@media (max-width: 560px) {
+  body { font-size: 15.5px; }
+  .nav { padding: 16px 0; }
+  .hero { padding: 28px 0 48px; }
+  .lede { font-size: 17.5px; }
+  .grid-4 { grid-template-columns: minmax(0, 1fr); }
+  section.block { padding: 56px 0; }
+  .card { padding: 20px; }
+  .step-list li { padding: 18px 18px 18px 58px; }
+  .step-list li::before { left: 18px; top: 18px; }
+  .terminal pre, .code pre { font-size: 11.5px; padding: 14px 16px; }
+  .cta .btn { flex: 1 1 auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="wrap">
+  <header class="nav">
+    <a class="brand" href="./" aria-label="promptcheck home">
+      <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true" focusable="false"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#00ff9d"/><stop offset="1" stop-color="#00e1ff"/></linearGradient></defs><rect width="32" height="32" rx="8" fill="url(#lg)"/><path d="M8.5 16.5l4.8 4.8L23.5 11" fill="none" stroke="#04070a" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      promptcheck
+    </a>
+    <nav aria-label="Main">
+      <ul>
+        <li class="hide-sm"><a href="#problem">Problem</a></li>
+        <li class="hide-sm"><a href="#how">How it works</a></li>
+        <li class="hide-sm"><a href="#ci">CI</a></li>
+        <li class="hide-sm"><a href="sample-report.html">Sample report</a></li>
+        <li><a class="btn btn-ghost btn-sm" href="https://github.com/Michealjunior/promptcheck">GitHub</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div>
+        <p class="kicker">// LLM regression testing</p>
+        <h1 id="hero-title">Regression tests for <span>LLM prompts</span>.</h1>
+        <p class="lede">Catch silent breakage before your users do.</p>
+        <p class="sub">Describe what a good answer looks like in YAML, run it against OpenAI-compatible APIs or Anthropic, and replay recorded outputs in CI so every pull request is tested deterministically and for free.</p>
+        <div class="install">
+          <code id="install-cmd"><span class="prompt">$ </span>pip install git+https://github.com/Michealjunior/promptcheck</code>
+          <button class="copy" type="button" data-copy="pip install git+https://github.com/Michealjunior/promptcheck" aria-describedby="copy-status">
+            <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="6.5" y="6.5" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M13.5 6.5V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v7A1.5 1.5 0 0 0 5 13.5h1.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+            <span>Copy</span>
+          </button>
+          <span id="copy-status" class="sr-only" role="status" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)"></span>
+        </div>
+        <div class="cta">
+          <a class="btn btn-primary" href="sample-report.html">View a sample report
+            <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5 10h10m-4-4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/Michealjunior/promptcheck">Source on GitHub</a>
+        </div>
+      </div>
+
+      <figure style="margin:0">
+        <div class="terminal hud" role="img" aria-label="Terminal output of promptcheck running the example suite: 6 cases passed and 3 failed, including an outage marked high instead of urgent, JSON wrapped in a Markdown fence, and a summary of 104 words against a limit of 60.">
+          <div class="term-bar" aria-hidden="true"><i></i><i></i><i></i><span>promptcheck run</span></div>
+<pre aria-hidden="true"><span class="t-acc">$</span> <span class="t-cmd">promptcheck run examples/support-triage.yaml \
+    --replay examples/recordings.json</span>
+<span class="t-bold">promptcheck 0.1.0</span> · Helpdesk assistant · replay · gpt-4.1-mini
+<span class="t-dim">9 cases, 13 samples</span>
+
+<span class="t-pass">PASS</span> triage-double-charge         <span class="t-dim">1/1</span>
+<span class="t-fail">FAIL</span> triage-checkout-outage       <span class="t-dim">0/1</span>
+     <span class="t-red">✗</span> json_field priority equals "urgent": got "high"
+<span class="t-fail">FAIL</span> triage-feature-request       <span class="t-dim">0/1</span>
+     <span class="t-red">✗</span> json_valid: output is wrapped in a Markdown code fence
+<span class="t-pass">PASS</span> triage-locked-account        <span class="t-dim">1/1</span>
+<span class="t-pass">PASS</span> triage-ambiguous-ticket      <span class="t-dim">4/5  80% (needs 80%)</span>
+<span class="t-pass">PASS</span> summarise-refund-thread      <span class="t-dim">1/1</span>
+<span class="t-fail">FAIL</span> summarise-escalation-thread  <span class="t-dim">0/1</span>
+     <span class="t-red">✗</span> max_words 60: 104 words, limit is 60
+<span class="t-pass">PASS</span> reply-admin-password-reset   <span class="t-dim">1/1</span>
+<span class="t-pass">PASS</span> reply-prompt-injection       <span class="t-dim">1/1</span>
+<span class="t-dim">────────────────────────────────────────────────────</span>
+<span class="t-verdict">FAILED</span>  6 passed, 3 failed, 1 flaky · 6/9 cases (66.7%)</pre>
+        </div>
+        <figcaption class="caption">Output of the bundled example suite, lightly abridged.</figcaption>
+      </figure>
+    </section>
+
+    <section class="block" id="problem" aria-labelledby="problem-title">
+      <div class="section-head">
+        <p class="kicker">// The problem</p>
+        <h2 id="problem-title">Prompts break quietly.</h2>
+        <p>Someone tweaks a prompt, swaps a model or a provider ships a new version, and the outputs drift. Nothing throws an exception. Without tests in CI, nobody notices until a customer does.</p>
+      </div>
+      <div class="grid-4">
+        <article class="card">
+          <span class="tag">Drift 01</span>
+          <h3>JSON stops parsing</h3>
+          <p>The model starts wrapping its answer in a Markdown fence or adds a friendly sentence first, and your parser falls over.</p>
+          <code class="fix">json_valid</code>
+        </article>
+        <article class="card">
+          <span class="tag">Drift 02</span>
+          <h3>Fields vanish or change</h3>
+          <p>A key is renamed, a label leaves the allowed set or an outage is suddenly “high” instead of “urgent”.</p>
+          <code class="fix">json_field: {path: priority, equals: urgent}</code>
+        </article>
+        <article class="card">
+          <span class="tag">Drift 03</span>
+          <h3>Answers grow longer</h3>
+          <p>A summary that used to fit the handover panel now runs to a hundred words and gets cut off on screen.</p>
+          <code class="fix">max_words: 60</code>
+        </article>
+        <article class="card">
+          <span class="tag">Drift 04</span>
+          <h3>Models start refusing</h3>
+          <p>After a safety update, a perfectly legitimate admin question gets “I can’t help with that”.</p>
+          <code class="fix">not_refusal</code>
+        </article>
+      </div>
+    </section>
+
+    <section class="block" id="how" aria-labelledby="how-title">
+      <div class="section-head">
+        <p class="kicker">// How it works</p>
+        <h2 id="how-title">Write expectations once. Run them on every change.</h2>
+        <p>A suite is a YAML file of cases. Each case is a prompt (or a conversation) plus the assertions its output must satisfy.</p>
+      </div>
+      <div class="steps">
+        <ol class="step-list">
+          <li>
+            <h3>Write a suite</h3>
+            <p>Set defaults once, then add cases with <code>{var}</code> substitution and any of 14 assertion types. Use <code>repeat</code> and <code>pass_rate</code> to measure flakiness.</p>
+          </li>
+          <li>
+            <h3>Run it live, then record</h3>
+            <p>Point it at OpenAI, OpenRouter, Groq, Ollama or Anthropic. Add <code>--record recordings.json</code> to keep the outputs.</p>
+          </li>
+          <li>
+            <h3>Replay in CI</h3>
+            <p><code>--replay recordings.json</code> makes runs deterministic, offline and free. A failing case exits with code 1 and fails the build.</p>
+          </li>
+          <li>
+            <h3>Read the report</h3>
+            <p>Coloured terminal output, JUnit XML for CI test views, Markdown for pull-request comments and a single-file HTML report.</p>
+          </li>
+        </ol>
+        <div class="code">
+          <div class="code-head"><span>examples/support-triage.yaml</span><span>excerpt</span></div>
+<pre tabindex="0"><code><span class="y-k">name</span><span class="y-p">:</span> <span class="y-s">Helpdesk assistant</span>
+<span class="y-k">defaults</span><span class="y-p">:</span>
+  <span class="y-k">provider</span><span class="y-p">:</span> <span class="y-s">openai</span>
+  <span class="y-k">model</span><span class="y-p">:</span> <span class="y-s">gpt-4.1-mini</span>
+  <span class="y-k">system</span><span class="y-p">: |</span>
+    <span class="y-s">Reply with one JSON object: category, priority,</span>
+    <span class="y-s">summary and needs_human.</span>
+
+<span class="y-k">cases</span><span class="y-p">:</span>
+  <span class="y-p">-</span> <span class="y-k">id</span><span class="y-p">:</span> <span class="y-s">triage-checkout-outage</span>
+    <span class="y-k">prompt</span><span class="y-p">:</span> <span class="y-s">"Ticket from {customer}:\n{ticket}"</span>
+    <span class="y-k">vars</span><span class="y-p">:</span>
+      <span class="y-k">customer</span><span class="y-p">:</span> <span class="y-s">Kofi Mensah</span>
+      <span class="y-k">ticket</span><span class="y-p">:</span> <span class="y-s">Every payment link returns Error 503 ...</span>
+    <span class="y-k">assert</span><span class="y-p">:</span>
+      <span class="y-p">-</span> <span class="y-k">json_valid</span>
+      <span class="y-p">-</span> <span class="y-k">json_field</span><span class="y-p">:</span> <span class="y-p">{</span><span class="y-k">path</span><span class="y-p">:</span> <span class="y-s">priority</span><span class="y-p">,</span> <span class="y-k">equals</span><span class="y-p">:</span> <span class="y-s">urgent</span><span class="y-p">}</span>
+
+  <span class="y-p">-</span> <span class="y-k">id</span><span class="y-p">:</span> <span class="y-s">triage-ambiguous-ticket</span>
+    <span class="y-k">repeat</span><span class="y-p">:</span> <span class="y-n">5</span>          <span class="y-c"># sample 5 times</span>
+    <span class="y-k">pass_rate</span><span class="y-p">:</span> <span class="y-n">0.8</span>     <span class="y-c"># 4 of 5 must pass</span>
+    <span class="y-k">prompt</span><span class="y-p">:</span> <span class="y-s">"Ticket from {customer}:\n{ticket}"</span>
+    <span class="y-k">assert</span><span class="y-p">:</span>
+      <span class="y-p">-</span> <span class="y-k">json_field</span><span class="y-p">:</span> <span class="y-p">{</span><span class="y-k">path</span><span class="y-p">:</span> <span class="y-s">category</span><span class="y-p">,</span> <span class="y-k">one_of</span><span class="y-p">:</span> <span class="y-p">[</span><span class="y-s">billing</span><span class="y-p">,</span> <span class="y-s">technical</span><span class="y-p">]}</span></code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="block" id="assertions" aria-labelledby="assertions-title">
+      <div class="section-head">
+        <p class="kicker">// Assertions</p>
+        <h2 id="assertions-title">Fourteen checks for the ways outputs drift.</h2>
+        <p>Text, structure, length and behaviour. Every failure explains itself, for example <code class="inline-fail">got "high"</code> or <code class="inline-fail">104 words, limit is 60</code>.</p>
+      </div>
+      <ul class="chips" aria-label="Assertion types">
+        <li><b>contains</b></li><li><b>not_contains</b></li><li><b>icontains</b></li><li><b>regex</b></li>
+        <li><b>equals</b></li><li><b>starts_with</b></li><li><b>one_of</b></li><li><b>json_valid</b></li>
+        <li><b>json_field</b> path · equals · exists · type · one_of</li><li><b>max_words</b></li><li><b>min_words</b></li>
+        <li><b>max_chars</b></li><li><b>not_refusal</b></li><li><b>refusal</b></li>
+      </ul>
+      <p class="note">The refusal checks use a documented, English-only phrase heuristic plus the provider’s own refusal signal when one is returned. The full reference is in the <a href="https://github.com/Michealjunior/promptcheck#writing-tests">README</a>.</p>
+    </section>
+
+    <section class="block" id="providers" aria-labelledby="providers-title">
+      <div class="section-head">
+        <p class="kicker">// Providers</p>
+        <h2 id="providers-title">Bring your own model.</h2>
+        <p>HTTP goes through the Python standard library; the only runtime dependency is PyYAML. API keys are read from environment variables and are never printed.</p>
+      </div>
+      <div class="grid-3">
+        <article class="card provider">
+          <h3><span class="dot" aria-hidden="true"></span>OpenAI-compatible</h3>
+          <p>Chat Completions with a configurable <code>base_url</code>.</p>
+          <ul><li>OpenAI</li><li>OpenRouter</li><li>Groq</li><li>Ollama, vLLM or any compatible server</li></ul>
+        </article>
+        <article class="card provider">
+          <h3><span class="dot" aria-hidden="true"></span>Anthropic</h3>
+          <p>The Messages API, with provider refusals and truncation surfaced in the report.</p>
+          <ul><li><code>ANTHROPIC_API_KEY</code></li><li>Configurable API version</li><li>Custom gateways via <code>base_url</code></li></ul>
+        </article>
+        <article class="card provider">
+          <h3><span class="dot" aria-hidden="true"></span>Replay</h3>
+          <p>Recorded outputs, served back exactly. Ideal for pull requests.</p>
+          <ul><li>Deterministic and offline</li><li>No API key, no token spend</li><li>Warns when a recording is stale</li></ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="block" id="ci" aria-labelledby="ci-title">
+      <div class="section-head">
+        <p class="kicker">// Run it in CI</p>
+        <h2 id="ci-title">A prompt change is a code change. Test it like one.</h2>
+        <p>Copy this job into your repository. The repository also ships a complete <a href="https://github.com/Michealjunior/promptcheck/blob/main/.github/workflows/example-llm-tests.yml">example workflow</a> that uploads the reports as artifacts.</p>
+      </div>
+      <div class="ci">
+        <div>
+          <div class="code">
+            <div class="code-head"><span>.github/workflows/prompt-tests.yml</span><span>GitHub Actions</span></div>
+<pre tabindex="0"><code><span class="y-k">name</span><span class="y-p">:</span> <span class="y-s">Prompt tests</span>
+<span class="y-k">on</span><span class="y-p">:</span> <span class="y-p">[</span><span class="y-s">pull_request</span><span class="y-p">]</span>
+
+<span class="y-k">jobs</span><span class="y-p">:</span>
+  <span class="y-k">promptcheck</span><span class="y-p">:</span>
+    <span class="y-k">runs-on</span><span class="y-p">:</span> <span class="y-s">ubuntu-latest</span>
+    <span class="y-k">steps</span><span class="y-p">:</span>
+      <span class="y-p">-</span> <span class="y-k">uses</span><span class="y-p">:</span> <span class="y-s">actions/checkout@v5</span>
+      <span class="y-p">-</span> <span class="y-k">uses</span><span class="y-p">:</span> <span class="y-s">actions/setup-python@v6</span>
+        <span class="y-k">with</span><span class="y-p">:</span>
+          <span class="y-k">python-version</span><span class="y-p">:</span> <span class="y-s">"3.12"</span>
+      <span class="y-p">-</span> <span class="y-k">run</span><span class="y-p">:</span> <span class="y-s">pip install git+https://github.com/Michealjunior/promptcheck</span>
+      <span class="y-p">-</span> <span class="y-k">run</span><span class="y-p">: &gt;-</span>
+          <span class="y-s">promptcheck run prompts/suite.yaml</span>
+          <span class="y-s">--replay prompts/recordings.json</span>
+          <span class="y-s">--junit reports/junit.xml</span>
+          <span class="y-s">--html reports/report.html</span>
+      <span class="y-p">-</span> <span class="y-k">if</span><span class="y-p">:</span> <span class="y-s">always()</span>
+        <span class="y-k">uses</span><span class="y-p">:</span> <span class="y-s">actions/upload-artifact@v4</span>
+        <span class="y-k">with</span><span class="y-p">:</span>
+          <span class="y-k">name</span><span class="y-p">:</span> <span class="y-s">promptcheck-reports</span>
+          <span class="y-k">path</span><span class="y-p">:</span> <span class="y-s">reports/</span></code></pre>
+          </div>
+        </div>
+        <ul class="checklist">
+          <li><strong>Exit code 1 on failure.</strong> Any failing case fails the job. Tune it with <code>--min-pass-rate 0.9</code> while a suite is new.</li>
+          <li><strong>Free and deterministic.</strong> Replay serves recorded outputs, so pull requests need no secrets.</li>
+          <li><strong>Reports where you look.</strong> JUnit XML for test views, Markdown for <code>$GITHUB_STEP_SUMMARY</code> or a PR comment, HTML as an artifact.</li>
+          <li><strong>Refresh on purpose.</strong> Re-record with a live model on a schedule or when you change a prompt, and review the diff of <code>recordings.json</code> like any other change.</li>
+          <li><strong>Resilient runs.</strong> Requests run in parallel with timeouts, and 429 or 5xx responses are retried with exponential backoff. One broken case never aborts the rest.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="block" id="report" aria-labelledby="report-title">
+      <div class="report">
+        <a class="shot" href="sample-report.html" aria-label="Open the sample HTML report">
+          <img src="report-preview.png" width="1440" height="900" loading="lazy" alt="The promptcheck HTML report for the example suite: a 66.7 percent pass ring, totals of 6 passed, 3 failed and 1 flaky, and expanded failing cases with their assertions and outputs.">
+        </a>
+        <div>
+          <p class="kicker">// Sample report</p>
+          <h2 id="report-title" style="font-size:clamp(28px,3.2vw,38px);line-height:1.12">See every failure, with the output that caused it.</h2>
+          <p style="margin-top:14px">This report was generated by promptcheck from the bundled example suite, replaying the recorded outputs in the repository. It is a single HTML file you can attach to any CI run.</p>
+          <div class="cta">
+            <a class="btn btn-primary" href="sample-report.html">Open the sample report</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="foot">
+      <p class="built">Built by <a href="https://michealjunior.github.io">Ayeni Oluwaferanmi Micheal</a></p>
+      <nav aria-label="Footer">
+        <a href="https://github.com/Michealjunior/promptcheck">Source on GitHub</a>
+        <a href="sample-report.html">Sample report</a>
+        <a href="https://github.com/Michealjunior/promptcheck/blob/main/LICENSE">MIT licence</a>
+      </nav>
+    </div>
+  </footer>
+</div>
+<script>
+(function () {
+  document.documentElement.classList.remove('no-js');
+  var status = document.getElementById('copy-status');
+  document.querySelectorAll('[data-copy]').forEach(function (button) {
+    var label = button.querySelector('span');
+    button.addEventListener('click', function () {
+      var text = button.getAttribute('data-copy');
+      var done = function (ok) {
+        label.textContent = ok ? 'Copied' : 'Press Ctrl+C';
+        status.textContent = ok ? 'Install command copied to the clipboard' : 'Copy failed; select the command to copy it';
+        setTimeout(function () { label.textContent = 'Copy'; }, 2000);
+      };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+      } else {
+        var range = document.createRange();
+        range.selectNodeContents(document.getElementById('install-cmd'));
+        var selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+        done(ok);
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>

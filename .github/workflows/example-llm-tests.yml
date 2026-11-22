@@ -1,0 +1,60 @@
+# A template you can copy into your own repository.
+#
+# It runs a promptcheck suite against recorded outputs (replay), so pull requests
+# get deterministic prompt regression tests with no API key and no token spend.
+# Reports are attached to the run as artifacts and the Markdown summary is shown
+# on the job page.
+#
+# In your repository:
+#   * install with: pip install git+https://github.com/Michealjunior/promptcheck
+#   * point the run step at your own suite and recording file
+#   * drop --min-pass-rate so that any failing case fails the build
+name: LLM prompt tests (example)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prompt-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install promptcheck
+        run: python -m pip install .
+
+      - name: Run prompt regression tests (replay)
+        env:
+          FORCE_COLOR: "1"
+        # The bundled example contains three deliberate regressions, so this demo
+        # accepts 60% of cases passing. Your own suite should normally require 100%.
+        run: >-
+          promptcheck run examples/support-triage.yaml
+          --provider replay --replay examples/recordings.json
+          --junit reports/junit.xml
+          --markdown reports/summary.md
+          --html reports/report.html
+          --min-pass-rate 0.6
+
+      - name: Add the summary to the job page
+        if: always()
+        run: |
+          if [ -f reports/summary.md ]; then cat reports/summary.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: promptcheck-reports
+          path: reports/
+          if-no-files-found: warn

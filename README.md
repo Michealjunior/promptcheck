@@ -40,11 +40,14 @@ promptcheck is a small command-line tool that treats prompts like code:
 
 ### Install
 
-promptcheck needs Python 3.10 or newer.
+promptcheck needs Python 3.10 or newer. The easiest way to install it as a command is [uv](https://docs.astral.sh/uv/), which also fetches a suitable Python if yours is too old (macOS ships 3.9 and no `pip` command):
 
 ```bash
-pip install git+https://github.com/Michealjunior/promptcheck
+uv tool install git+https://github.com/Michealjunior/promptcheck
+promptcheck --version
 ```
+
+Alternatives: `pipx install git+https://github.com/Michealjunior/promptcheck`, or inside a Python 3.10+ virtual environment, `python3 -m pip install git+https://github.com/Michealjunior/promptcheck`. To try it once without installing: `uvx --from git+https://github.com/Michealjunior/promptcheck promptcheck --help`.
 
 ### Try the example offline
 
@@ -53,7 +56,6 @@ The repository ships a realistic suite for a helpdesk assistant and a recording 
 ```bash
 git clone https://github.com/Michealjunior/promptcheck
 cd promptcheck
-pip install .
 promptcheck run examples/support-triage.yaml \
   --provider replay --replay examples/recordings.json \
   --html report.html --junit junit.xml --markdown summary.md

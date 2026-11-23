@@ -5,11 +5,11 @@
 [![Tests: 367 passing](https://img.shields.io/badge/tests-367%20passing-00ff9d.svg)](#testing)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-00ff9d.svg)](LICENSE)
 [![Python 3.10 | 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-00e1ff.svg)](pyproject.toml)
-[![Live site](https://img.shields.io/badge/live%20site-michealjunior.github.io%2Fpromptcheck-0a1218.svg)](https://michealjunior.github.io/promptcheck/)
+[![Live site](https://img.shields.io/badge/live%20site-promptcheck--app.vercel.app-0a1218.svg)](https://promptcheck-app.vercel.app/)
 
 ![The promptcheck HTML report for the bundled example suite: 6 of 9 cases passing, with the failing outage-triage case expanded to show the failed assertion and the model output](docs/screenshot.png)
 
-<sub>The HTML report for the bundled example suite, generated offline from recorded outputs. [Open the live sample report](https://michealjunior.github.io/promptcheck/sample-report.html).</sub>
+<sub>The HTML report for the bundled example suite, generated offline from recorded outputs. [Open the live sample report](https://promptcheck-app.vercel.app/sample-report.html).</sub>
 
 ## The problem
 

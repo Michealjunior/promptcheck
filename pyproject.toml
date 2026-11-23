@@ -36,7 +36,7 @@ dev = ["pytest>=8.0", "ruff>=0.6"]
 promptcheck = "promptcheck.cli:entry"
 
 [project.urls]
-Homepage = "https://michealjunior.github.io/promptcheck/"
+Homepage = "https://promptcheck-app.vercel.app/"
 Source = "https://github.com/Michealjunior/promptcheck"
 Issues = "https://github.com/Michealjunior/promptcheck/issues"
 

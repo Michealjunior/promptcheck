@@ -6,14 +6,14 @@
 <title>promptcheck · Regression tests for LLM prompts</title>
 <meta name="description" content="promptcheck is an open-source CLI that runs regression tests for LLM prompts. Write expectations in YAML, test against OpenAI-compatible APIs or Anthropic, and replay recorded outputs in CI for free.">
 <meta name="theme-color" content="#04070a">
-<link rel="canonical" href="https://michealjunior.github.io/promptcheck/">
+<link rel="canonical" href="https://promptcheck-app.vercel.app/">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="promptcheck">
 <meta property="og:title" content="promptcheck · Regression tests for LLM prompts">
 <meta property="og:description" content="Catch silent breakage before your users do. YAML test suites for prompts, replayable in CI, with JUnit, Markdown and HTML reports.">
-<meta property="og:url" content="https://michealjunior.github.io/promptcheck/">
-<meta property="og:image" content="https://michealjunior.github.io/promptcheck/og.png">
+<meta property="og:url" content="https://promptcheck-app.vercel.app/">
+<meta property="og:image" content="https://promptcheck-app.vercel.app/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="promptcheck: regression tests for LLM prompts">
@@ -424,7 +424,7 @@ cases:
         </div>
         <div>
           <div class="cmd"><pre tabindex="0"><span class="c"># download the suite and run it with your own key</span>
-<span class="a">$</span> curl -LO https://michealjunior.github.io/promptcheck/examples/shop-assistant.yaml
+<span class="a">$</span> curl -LO https://promptcheck-app.vercel.app/examples/shop-assistant.yaml
 <span class="a">$</span> export GROQ_API_KEY=your_key
 <span class="a">$</span> promptcheck run shop-assistant.yaml --provider groq --model llama-3.3-70b-versatile --html report.html</pre></div>
           <p class="tip">Open the file to see how each check is written; every case has a one-line description.</p>

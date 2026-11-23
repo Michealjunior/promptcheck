@@ -30,6 +30,7 @@ from typing import Any
 
 from promptcheck import __version__
 from promptcheck.errors import ConfigError, ProviderError
+from promptcheck.files import FileProblem, atomic_write_text, check_writable, read_utf8
 from promptcheck.providers.base import Completion, CompletionRequest, Provider
 
 FORMAT = "promptcheck-recording/1"
@@ -59,15 +60,36 @@ def _parse_entry(path: Path, case_id: str, index: int, raw: Any) -> RecordedOutp
     )
 
 
-def load_recordings(path: str | Path) -> dict[str, list[RecordedOutput]]:
-    """Load a recording file in either the full or the shorthand format."""
+def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJSONKey(key)
+        result[key] = value
+    return result
+
+
+class _DuplicateJSONKey(ValueError):
+    pass
+
+
+def read_recording_cases(path: str | Path) -> dict[str, Any]:
+    """Read a recording file and return its raw ``cases`` mapping, validating every entry."""
     file = Path(path)
     try:
-        data = json.loads(file.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        raise ConfigError(f"{file}: replay file not found (create it with --record)") from None
+        text = read_utf8(file, "recording file")
+    except FileProblem as exc:
+        message = str(exc)
+        if message.endswith("recording file not found"):
+            message += " (create it with --record)"
+        raise ConfigError(message) from None
+    try:
+        data = json.loads(text, object_pairs_hook=_reject_duplicates)
+    except _DuplicateJSONKey as exc:
+        raise ConfigError(f"{file}: duplicate key {str(exc)!r}; each case may appear only once") from None
     except json.JSONDecodeError as exc:
-        raise ConfigError(f"{file}: not valid JSON ({exc.msg} at line {exc.lineno})") from None
+        hint = "; it contains merge-conflict markers" if "<<<<<<<" in text or ">>>>>>>" in text else ""
+        raise ConfigError(f"{file}: not valid JSON ({exc.msg} at line {exc.lineno}){hint}") from None
     if not isinstance(data, dict):
         raise ConfigError(f"{file}: expected a JSON object mapping case ids to outputs")
     if "format" in data or "cases" in data:
@@ -79,13 +101,46 @@ def load_recordings(path: str | Path) -> dict[str, list[RecordedOutput]]:
             raise ConfigError(f"{file}: 'cases' must map case ids to lists of recordings")
     else:
         cases = data
-    recordings: dict[str, list[RecordedOutput]] = {}
     for case_id, raw in cases.items():
+        entries = raw if isinstance(raw, list) else [raw]
+        if not entries:
+            raise ConfigError(f"{file}: case '{case_id}' has an empty list of recordings")
+        for index, entry in enumerate(entries):
+            _parse_entry(file, str(case_id), index, entry)
+    return dict(cases)
+
+
+def load_recordings(path: str | Path) -> dict[str, list[RecordedOutput]]:
+    """Load a recording file in either the full or the shorthand format."""
+    file = Path(path)
+    recordings: dict[str, list[RecordedOutput]] = {}
+    for case_id, raw in read_recording_cases(file).items():
         entries = raw if isinstance(raw, list) else [raw]
         recordings[str(case_id)] = [
             _parse_entry(file, str(case_id), i, entry) for i, entry in enumerate(entries)
         ]
     return recordings
+
+
+def check_recording_target(path: str | Path) -> None:
+    """Fail before a run if ``--record`` could not safely update ``path``."""
+    file = Path(path)
+    try:
+        check_writable(file, "recording")
+    except FileProblem as exc:
+        raise ConfigError(str(exc)) from None
+    if file.exists():
+        _existing_cases(file)
+
+
+def _existing_cases(file: Path) -> dict[str, Any]:
+    try:
+        return read_recording_cases(file)
+    except ConfigError as exc:
+        raise ConfigError(
+            f"refusing to overwrite {file}: it is not a valid recording ({exc}). "
+            "Fix it (for example resolve merge conflicts) or delete it, then run again"
+        ) from None
 
 
 class ReplayProvider(Provider):
@@ -170,33 +225,34 @@ class RecordingProvider(Provider):
         sample succeeded. Returns ``(recorded_ids, skipped_ids)``.
         """
         file = Path(path)
-        existing: dict[str, Any] = {}
-        if file.exists():
-            try:
-                current = json.loads(file.read_text(encoding="utf-8"))
-                if isinstance(current, dict):
-                    cases = current.get("cases") if "cases" in current else current
-                    if isinstance(cases, dict):
-                        existing = dict(cases)
-            except (OSError, json.JSONDecodeError):
-                existing = {}
         recorded, skipped = [], []
+        new_cases: dict[str, Any] = {}
         with self._lock:
             for case_id, count in expected.items():
                 samples = self._entries.get(case_id, {})
                 if len(samples) == count and all(i in samples for i in range(count)):
-                    existing[case_id] = [samples[i] for i in range(count)]
+                    new_cases[case_id] = [samples[i] for i in range(count)]
                     recorded.append(case_id)
                 else:
                     skipped.append(case_id)
+        try:
+            existing = _existing_cases(file) if file.exists() else {}
+        except ConfigError as exc:
+            # The file became unreadable during the run: keep it, and keep the new outputs too.
+            fallback = file.with_name(f"{file.stem}.new{file.suffix or '.json'}")
+            atomic_write_text(fallback, self._document(suite_name, new_cases))
+            raise ConfigError(f"{exc}. The new outputs were saved to {fallback} instead") from None
+        existing.update(new_cases)
+        atomic_write_text(file, self._document(suite_name, existing))
+        return recorded, skipped
+
+    def _document(self, suite_name: str, cases: dict[str, Any]) -> str:
         document = {
             "format": FORMAT,
             "suite": suite_name,
             "recorded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "recorded_with": f"promptcheck {__version__}",
             "provider": self.inner.label,
-            "cases": existing,
+            "cases": cases,
         }
-        file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        return recorded, skipped
+        return json.dumps(document, indent=2, ensure_ascii=False) + "\n"

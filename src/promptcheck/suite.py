@@ -19,7 +19,9 @@ from promptcheck.assertions import (
     split_entry,
 )
 from promptcheck.errors import SuiteError
-from promptcheck.templating import MissingVariableError, render, render_deep
+from promptcheck.files import FileProblem, read_utf8
+from promptcheck.templating import MissingVariableError, is_variable_name, placeholders, render, render_deep
+from promptcheck.urls import validate_base_url
 
 PROVIDERS = ("openai", "openrouter", "groq", "ollama", "anthropic", "replay")
 
@@ -182,7 +184,11 @@ def _optional_positive_int(
 
 
 def parse_rate(value: Any) -> float:
-    """Parse a pass rate given as ``0.8``, ``80%`` or ``"0.8"``. Raises ValueError."""
+    """Parse a pass rate given as ``0.8``, ``80%`` or ``"0.8"``. Raises ValueError.
+
+    The rate must be greater than 0 and at most 1: a rate of 0 would let a case
+    (or a run) pass with no passing samples at all.
+    """
     if isinstance(value, bool):
         raise ValueError(value)
     if isinstance(value, str):
@@ -192,7 +198,7 @@ def parse_rate(value: Any) -> float:
         rate = float(value)
     else:
         raise ValueError(value)
-    if not 0.0 <= rate <= 1.0:
+    if not 0.0 < rate <= 1.0:
         raise ValueError(value)
     return rate
 
@@ -204,7 +210,8 @@ def _optional_rate(where: _Where, scope: str, key: str, value: Any) -> float | N
         return parse_rate(value)
     except (TypeError, ValueError):
         raise where.error(
-            scope, f"'{key}' must be a fraction between 0 and 1 (or a percentage like 80%), got {value!r}"
+            scope,
+            f"'{key}' must be greater than 0 and at most 1 (for example 0.8 or 80%), got {value!r}",
         ) from None
 
 
@@ -214,8 +221,12 @@ def _vars(where: _Where, scope: str, value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise where.error(scope, f"'vars' must be a mapping of names to values, got {_type_name(value)}")
     for name in value:
-        if not isinstance(name, str) or not name.isidentifier():
-            raise where.error(scope, f"variable name {name!r} must be a valid identifier")
+        if not is_variable_name(name):
+            raise where.error(
+                scope,
+                f"variable name {name!r} must be an identifier "
+                "(letters, digits and _, not starting with a digit)",
+            )
     return dict(value)
 
 
@@ -223,29 +234,92 @@ def _render(where: _Where, scope: str, what: str, template: str, variables: dict
     try:
         return render(template, variables)
     except MissingVariableError as exc:
-        names = ", ".join(f"{{{n}}}" for n in exc.names)
-        plural = "variables" if len(exc.names) > 1 else "variable"
-        raise where.error(
-            scope,
-            f"{what} uses {names} but no {plural} named {', '.join(exc.names)} "
-            "is defined in 'vars' (write {{name}} for a literal brace)",
-        ) from None
+        hint = " (write {{name}} for a literal brace)" if exc.names else ""
+        raise where.error(scope, f"{what}: {exc.describe()}{hint}") from None
+
+
+def _base_url(where: _Where, value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        return validate_base_url(value)
+    except ValueError as exc:
+        raise where.error("defaults", f"'base_url' {exc}") from None
 
 
 # --------------------------------------------------------------------------- loading
+
+
+class _DuplicateKey(Exception):
+    def __init__(self, key: Any, first: yaml.Mark, second: yaml.Mark) -> None:
+        super().__init__(key)
+        self.key, self.first, self.second = key, first, second
+
+
+class StrictLoader(yaml.SafeLoader):
+    """A safe YAML loader that rejects duplicate mapping keys.
+
+    Plain ``yaml.safe_load`` keeps only the last of two identical keys, so a
+    second ``assert:`` block would silently replace the first one.
+    """
+
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
+        if isinstance(node, yaml.MappingNode):
+            seen: dict[Any, yaml.Mark] = {}
+            for key_node, _ in node.value:
+                if key_node.tag == "tag:yaml.org,2002:merge":
+                    continue  # "<<: *anchor" merges are allowed to be overridden
+                key = self.construct_object(key_node, deep=True)
+                try:
+                    first = seen.get(key)
+                except TypeError:  # unhashable key; the base class reports it
+                    continue
+                if first is not None:
+                    raise _DuplicateKey(key, first, key_node.start_mark)
+                seen[key] = key_node.start_mark
+        return super().construct_mapping(node, deep=deep)
+
+
+def _scope_for_line(text: str, line: int) -> str:
+    """Name the part of the suite (case id, defaults or suite) that contains ``line``."""
+    try:
+        root = yaml.compose(text, Loader=yaml.SafeLoader)
+    except yaml.YAMLError:
+        return "suite"
+    if not isinstance(root, yaml.MappingNode):
+        return "suite"
+    for key_node, value_node in root.value:
+        if not (value_node.start_mark.line <= line <= value_node.end_mark.line):
+            continue
+        if key_node.value == "defaults":
+            return "defaults"
+        if key_node.value == "cases" and isinstance(value_node, yaml.SequenceNode):
+            for position, item in enumerate(value_node.value, start=1):
+                if item.start_mark.line <= line <= item.end_mark.line:
+                    if isinstance(item, yaml.MappingNode):
+                        for k, v in item.value:
+                            if k.value == "id" and isinstance(v, yaml.ScalarNode):
+                                return f"case '{v.value.strip()}'"
+                    return f"case #{position}"
+    return "suite"
 
 
 def load_suite(path: str | Path) -> Suite:
     """Read, validate and render a suite file."""
     suite_path = Path(path)
     try:
-        text = suite_path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        raise SuiteError(f"{suite_path}: file not found") from None
-    except OSError as exc:
-        raise SuiteError(f"{suite_path}: cannot read file ({exc.strerror})") from None
+        text = read_utf8(suite_path, "suite file")
+    except FileProblem as exc:
+        raise SuiteError(str(exc)) from None
     try:
-        data = yaml.safe_load(text)
+        data = yaml.load(text, Loader=StrictLoader)  # StrictLoader subclasses SafeLoader
+    except _DuplicateKey as exc:
+        line, first = exc.second.line + 1, exc.first.line + 1
+        scope = _scope_for_line(text, exc.second.line)
+        raise SuiteError(
+            f"{suite_path}: {scope}: duplicate key '{exc.key}' at line {line} (first defined at line "
+            f"{first}); YAML would silently keep only the last one, so merge them into one '{exc.key}'"
+        ) from None
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
         location = f" at line {mark.line + 1}, column {mark.column + 1}" if mark else ""
@@ -284,7 +358,7 @@ def parse_suite(data: Any, path: str | Path = "<suite>") -> Suite:
     provider = ProviderSettings(
         name=provider_name,
         model=_optional_str(where, "defaults", "model", defaults.get("model")),
-        base_url=_optional_str(where, "defaults", "base_url", defaults.get("base_url")),
+        base_url=_base_url(where, defaults.get("base_url")),
         api_key_env=_optional_str(where, "defaults", "api_key_env", defaults.get("api_key_env")),
         anthropic_version=_optional_str(
             where, "defaults", "anthropic_version", defaults.get("anthropic_version")
@@ -391,18 +465,18 @@ def _parse_case(
         raise where.error(scope, "'assert' must be a non-empty list of assertions")
     checks: list[Check] = []
     for number, entry in enumerate(raw_asserts, start=1):
+        templated = False
         try:
             kind, arg = split_entry(entry)
             if kind not in NO_TEMPLATE_KINDS:
+                templated = _has_placeholders(arg)
                 arg = render_deep(arg, variables)
             checks.append(build_check(kind, arg))
         except AssertionConfigError as exc:
-            raise where.error(scope, f"assertion #{number}: {exc}") from None
+            suffix = " (after substituting variables)" if templated else ""
+            raise where.error(scope, f"assertion #{number}: {exc}{suffix}") from None
         except MissingVariableError as exc:
-            names = ", ".join(f"{{{n}}}" for n in exc.names)
-            raise where.error(
-                scope, f"assertion #{number} uses {names}, which is not defined in 'vars'"
-            ) from None
+            raise where.error(scope, f"assertion #{number}: {exc.describe()}") from None
 
     repeat = _optional_positive_int(where, scope, "repeat", raw.get("repeat"), MAX_REPEAT)
     rate = _optional_rate(where, scope, "pass_rate", raw.get("pass_rate"))
@@ -422,6 +496,16 @@ def _parse_case(
         max_tokens=default_max_tokens if max_tokens is None else max_tokens,
         variables=variables,
     )
+
+
+def _has_placeholders(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(placeholders(value))
+    if isinstance(value, list):
+        return any(_has_placeholders(item) for item in value)
+    if isinstance(value, dict):
+        return any(_has_placeholders(item) for item in value.values())
+    return False
 
 
 def _parse_messages(where: _Where, scope: str, raw: Any, variables: dict[str, Any]) -> list[dict[str, str]]:

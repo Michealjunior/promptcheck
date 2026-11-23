@@ -7,7 +7,8 @@ from typing import Any
 
 from promptcheck.errors import ConfigError, ProviderError
 from promptcheck.providers import http
-from promptcheck.providers.base import Completion, CompletionRequest, Provider
+from promptcheck.providers.base import Completion, CompletionRequest, Provider, scrub_secret
+from promptcheck.urls import validate_base_url
 
 DEFAULT_BASE_URL = "https://api.anthropic.com"
 DEFAULT_API_VERSION = "2026-10-21"
@@ -32,7 +33,13 @@ class AnthropicProvider(Provider):
         super().__init__()
         env = os.environ if environ is None else environ
         self.model = model
-        self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
+        if base_url is None:
+            self.base_url = DEFAULT_BASE_URL
+        else:
+            try:
+                self.base_url = validate_base_url(base_url)
+            except ValueError as exc:
+                raise ConfigError(f"base URL {exc}") from None
         self.api_version = api_version or DEFAULT_API_VERSION
         self.policy = policy or http.RetryPolicy()
         self.api_key_env = api_key_env or "ANTHROPIC_API_KEY"
@@ -51,7 +58,9 @@ class AnthropicProvider(Provider):
 
     @property
     def url(self) -> str:
-        return f"{self.base_url}/v1/messages"
+        # Accept both https://host and https://host/v1 without producing /v1/v1/messages.
+        base = self.base_url if self.base_url.endswith("/v1") else f"{self.base_url}/v1"
+        return f"{base}/messages"
 
     @property
     def sends_sampling_params(self) -> bool:
@@ -87,12 +96,28 @@ class AnthropicProvider(Provider):
         content = data.get("content")
         if not isinstance(content, list):
             raise ProviderError("unexpected response: no 'content' in the message")
-        text = "".join(
-            block.get("text", "")
+        texts = [
+            block.get("text")
             for block in content
-            if isinstance(block, dict) and block.get("type") == "text"
-        )
+            if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+        ]
         stop = data.get("stop_reason")
+        if not texts and stop != "refusal":
+            tools = [
+                str(block.get("name") or "unnamed tool")
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "tool_use"
+            ]
+            if tools:
+                raise ProviderError(
+                    f"the model called a tool ({', '.join(tools)}) instead of replying with text "
+                    f"(stop_reason={stop}); promptcheck grades text replies"
+                )
+            raise ProviderError(
+                f"the response contains no text block (stop_reason={stop or 'missing'}), "
+                "so there is nothing to grade"
+            )
+        text = "".join(texts)
         warnings = []
         if stop == "max_tokens":
             warnings.append("output was cut off by max_tokens (stop_reason=max_tokens)")
@@ -116,4 +141,4 @@ class AnthropicProvider(Provider):
             policy=self.policy,
             secrets=(self._api_key,),
         )
-        return self.parse_response(data)
+        return scrub_secret(self.parse_response(data), self._api_key)

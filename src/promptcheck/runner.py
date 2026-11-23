@@ -28,6 +28,8 @@ class SampleResult:
     warnings: list[str] = field(default_factory=list)
     refused: bool = False
     model: str | None = None
+    internal: bool = False
+    """True when the error came from a bug in promptcheck rather than the provider."""
 
     @property
     def status(self) -> str:
@@ -59,7 +61,8 @@ class CaseResult:
 
     @property
     def passed(self) -> bool:
-        return bool(self.samples) and self.pass_rate + 1e-9 >= self.threshold
+        # A case with no passing sample never passes, whatever its threshold.
+        return self.passed_samples > 0 and self.pass_rate + 1e-9 >= self.threshold
 
     @property
     def status(self) -> str:
@@ -143,7 +146,26 @@ class RunResult:
         return self.passed / self.total if self.total else 0.0
 
     def ok(self, min_pass_rate: float = 1.0) -> bool:
-        return self.total > 0 and self.pass_rate + 1e-9 >= min_pass_rate
+        return self.total > 0 and self.passed > 0 and self.pass_rate + 1e-9 >= min_pass_rate
+
+    @property
+    def internal_errors(self) -> list[tuple[str, int, str]]:
+        """``(case id, sample index, message)`` for failures caused by promptcheck itself."""
+        return [
+            (case.case.id, sample.index, sample.error or "")
+            for case in self.cases
+            for sample in case.samples
+            if sample.internal
+        ]
+
+
+class RunInterrupted(Exception):
+    """Raised by :func:`run_suite` when the run is cancelled with Ctrl-C."""
+
+    def __init__(self, completed: int, total: int) -> None:
+        super().__init__(f"interrupted after {completed} of {total} samples")
+        self.completed = completed
+        self.total = total
 
 
 def build_request(case: Case, sample: int, default_model: str | None, timeout: float) -> CompletionRequest:
@@ -169,8 +191,13 @@ def run_sample(
         completion = provider.complete(request)
     except PromptcheckError as exc:
         return SampleResult(index=sample, error=str(exc), latency_ms=_ms(started))
-    except Exception as exc:  # a bug or unexpected failure must not abort the run
-        return SampleResult(index=sample, error=f"{type(exc).__name__}: {exc}", latency_ms=_ms(started))
+    except Exception as exc:  # a bug in promptcheck must not abort the other cases
+        return SampleResult(
+            index=sample,
+            error=f"internal error: {type(exc).__name__}: {exc}",
+            latency_ms=_ms(started),
+            internal=True,
+        )
     latency = _ms(started)
     return SampleResult(
         index=sample,
@@ -212,7 +239,8 @@ def run_suite(
     started_at = datetime.now(timezone.utc)
     clock = time.perf_counter()
     workers = max(1, min(concurrency, len(jobs) or 1))
-    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="promptcheck") as pool:
+    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="promptcheck")
+    try:
         futures = {
             pool.submit(run_sample, provider, case, i, default_model, request_timeout): (case.id, i)
             for case, i in jobs
@@ -221,6 +249,11 @@ def run_suite(
             results[futures[future]] = future.result()
             if on_sample:
                 on_sample(done, len(jobs))
+    except KeyboardInterrupt:
+        # Drop every queued request; requests already in flight finish in the background.
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise RunInterrupted(len(results), len(jobs)) from None
+    pool.shutdown(wait=True)
     case_results = [
         CaseResult(case=case, samples=[results[(case.id, i)] for i in range(case.repeat)])
         for case in selected

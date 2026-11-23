@@ -3,9 +3,11 @@ from __future__ import annotations
 import io
 import json
 import textwrap
+import threading
 import urllib.error
 from collections.abc import Callable
 from email.message import Message
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -68,9 +70,15 @@ class FakeResponse:
     def __init__(self, payload: Any, status: int = 200) -> None:
         self.status = status
         self._body = json.dumps(payload).encode() if not isinstance(payload, bytes) else payload
+        self._position = 0
 
-    def read(self) -> bytes:
-        return self._body
+    def read(self, amount: int | None = None) -> bytes:
+        end = len(self._body) if amount is None else self._position + amount
+        chunk = self._body[self._position : end]
+        self._position += len(chunk)
+        return chunk
+
+    read1 = read
 
     def __enter__(self) -> FakeResponse:
         return self
@@ -115,3 +123,71 @@ class FakeOpener:
     def header(self, name: str, index: int = -1) -> str | None:
         # urllib normalises header names with str.capitalize()
         return self.requests[index].get_header(name.capitalize())
+
+
+class StubServer:
+    """A real HTTP server on 127.0.0.1 for end-to-end tests. Never talks to a real API.
+
+    Set ``respond`` to a function ``(handler, path, body) -> None`` that writes the reply.
+    Every request is recorded in ``requests`` as ``(method, path, headers, body)``.
+    """
+
+    def __init__(self) -> None:
+        self.requests: list[tuple[str, str, dict[str, str], Any]] = []
+        self.respond: Callable[[BaseHTTPRequestHandler, str, Any], None] = self.reply_json
+        stub = self
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *args: Any) -> None:
+                pass
+
+            def _handle(self) -> None:
+                length = int(self.headers.get("Content-Length") or 0)
+                raw = self.rfile.read(length) if length else b""
+                try:
+                    body = json.loads(raw) if raw else None
+                except json.JSONDecodeError:
+                    body = raw
+                stub.requests.append((self.command, self.path, dict(self.headers), body))
+                stub.respond(self, self.path, body)
+
+            do_POST = _handle
+            do_GET = _handle
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.daemon_threads = True
+        self.server.handle_error = lambda request, address: None  # clients may hang up on purpose
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    @staticmethod
+    def reply_json(
+        handler: BaseHTTPRequestHandler, path: str, body: Any, payload: Any = None, status: int = 200
+    ) -> None:
+        data = json.dumps(payload if payload is not None else {"ok": True}).encode()
+        handler.send_response(status)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(data)))
+        handler.end_headers()
+        handler.wfile.write(data)
+
+    def close(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture
+def stub_server():
+    servers: list[StubServer] = []
+
+    def start() -> StubServer:
+        server = StubServer()
+        servers.append(server)
+        return server
+
+    yield start
+    for server in servers:
+        server.close()

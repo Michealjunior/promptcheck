@@ -6,6 +6,7 @@ from html import escape
 from pathlib import Path
 
 from promptcheck import __version__
+from promptcheck.files import atomic_write_text
 from promptcheck.reporters.common import duration, latency, percent
 from promptcheck.runner import ERROR, FAIL, PASS, CaseResult, RunResult, SampleResult
 
@@ -491,7 +492,4 @@ def render_html(run: RunResult, min_pass_rate: float = 1.0) -> str:
 
 
 def write_html(run: RunResult, path: str | Path, min_pass_rate: float = 1.0) -> Path:
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(render_html(run, min_pass_rate), encoding="utf-8")
-    return target
+    return atomic_write_text(path, render_html(run, min_pass_rate))

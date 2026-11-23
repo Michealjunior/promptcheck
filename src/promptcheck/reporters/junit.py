@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from promptcheck import __version__
+from promptcheck.files import atomic_write_text
 from promptcheck.runner import ERROR, FAIL, CaseResult, RunResult
 
 # XML 1.0 forbids most control characters; model output occasionally contains them.
@@ -114,7 +115,4 @@ def render_junit(run: RunResult) -> str:
 
 
 def write_junit(run: RunResult, path: str | Path) -> Path:
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(render_junit(run), encoding="utf-8")
-    return target
+    return atomic_write_text(path, render_junit(run))

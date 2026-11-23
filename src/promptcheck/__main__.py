@@ -1,3 +1,3 @@
-from promptcheck.cli import main
+from promptcheck.cli import entry
 
-raise SystemExit(main())
+entry()

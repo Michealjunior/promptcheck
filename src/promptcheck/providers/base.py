@@ -6,6 +6,7 @@ import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
+from promptcheck.providers.http import redact
 from promptcheck.suite import request_fingerprint
 
 
@@ -67,3 +68,14 @@ class Provider(ABC):
     @abstractmethod
     def complete(self, request: CompletionRequest) -> Completion:
         """Return a completion or raise :class:`promptcheck.errors.ProviderError`."""
+
+
+def scrub_secret(completion: Completion, secret: str | None) -> Completion:
+    """Remove an API key that a misbehaving server echoed into the output itself."""
+    if not secret:
+        return completion
+    cleaned = redact(completion.text, (secret,))
+    if cleaned != completion.text:
+        completion.text = cleaned
+        completion.warnings.append("the response contained the API key; it was replaced with ***")
+    return completion

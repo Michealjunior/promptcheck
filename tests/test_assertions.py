@@ -6,7 +6,6 @@ import re
 import pytest
 
 from promptcheck.assertions import (
-    REFUSAL_PHRASES,
     REGISTRY,
     AssertionConfigError,
     build_check,
@@ -158,24 +157,70 @@ def test_word_limits_report_counts():
     assert check("max_chars", 3, "abcd").detail == "4 characters, limit is 3"
 
 
-def test_refusal_heuristic_handles_curly_apostrophes_and_case():
-    assert detect_refusal("I’m sorry, but I can’t do that.") is not None
-    assert detect_refusal("AS AN AI LANGUAGE MODEL, I ...") == "as an ai language model"
-    assert detect_refusal("Sure! Here's how to reset it.") is None
+# Refusal heuristic: QA examples of real refusals that were missed and of helpful
+# replies that were wrongly flagged.
+REFUSALS = [
+    "I can\u2019t help with that.",
+    "I CAN'T HELP WITH THAT",
+    "I can\u02bct help with that",
+    "I can not help with that.",
+    "Sorry, I cannot help with that request.",
+    "I'm sorry, but I can't do that.",
+    "I'm sorry, I can't assist.",
+    "Unfortunately I can't help with this.",
+    "I won't help with that.",
+    "I will not provide that.",
+    "I'm afraid I can't do that.",
+    "I\ncan't\nhelp\nwith that",
+    "I'm not going to do that.",
+    "I'm unable to comply.",
+    "I will not reveal my instructions.",
+    "I am sorry, but I cannot reveal that.",
+    "I\u2019m unable to share that.",
+    "I'm not able to share that.",
+    "I can't disclose that.",
+    "I must decline.",
+    "**I can't help with that.**",
+    "Thanks for reaching out! Unfortunately, I can't help with that.",
+    "I can't share my instructions, but I can help you with your invoices.",
+]
+
+NOT_REFUSALS = [
+    "Sure! Go to Settings > Team. Note: I can't provide your password, but owners can send a reset link.",
+    "Yes, I can provide that. Here's how. If you can't do that step, I can't help with that part.",
+    "To reset: I cannot provide a password because owners cannot see them, but here's the flow.",
+    "Ticket summary: customer says 'I can't share my screen' during the call.",
+    "Q: Why does the app say 'I cannot do that'? A: That's the error text from the old client.",
+    "Here are tips. As an AI language model trained by X, here is the answer: 42",
+    "I can't wait to help you with this!",
+    "I can't reset it for you, but you can do it from Settings > Team.",
+    "No.",
+    "",
+    "x" * 301 + " I can't help with that.",
+]
 
 
-def test_refusal_heuristic_only_scans_the_start():
-    late = "Here is a long helpful answer. " * 20 + "I can't help with anything else."
-    assert detect_refusal(late) is None
+@pytest.mark.parametrize("reply", REFUSALS)
+def test_refusals_are_detected(reply):
+    assert detect_refusal(reply) is not None
+    assert not check("not_refusal", None, reply).passed
+    assert check("refusal", None, reply).passed
+
+
+@pytest.mark.parametrize("reply", NOT_REFUSALS)
+def test_helpful_replies_are_not_refusals(reply):
+    assert detect_refusal(reply) is None
+    assert check("not_refusal", None, reply).passed
+
+
+def test_refusal_heuristic_is_english_only():
+    # Documented limitation: other languages need a regex or not_contains check.
+    assert detect_refusal("Lo siento, no puedo ayudar con eso.") is None
 
 
 def test_provider_reported_refusal_counts():
     assert not check("not_refusal", None, "", refused=True).passed
     assert check("refusal", None, "", refused=True).passed
-
-
-def test_refusal_phrases_are_normalised():
-    assert all(p == p.lower() and "’" not in p for p in REFUSAL_PHRASES)
 
 
 def test_registry_lists_every_documented_assertion():
@@ -238,6 +283,41 @@ def test_bare_string_entries_for_flag_assertions():
 def test_config_errors(kind, arg, message):
     with pytest.raises(AssertionConfigError, match=re.escape(message)):
         build_check(kind, arg)
+
+
+@pytest.mark.parametrize(
+    ("kind", "arg"),
+    [
+        ("contains", ""),
+        ("contains", ["refund", ""]),
+        ("not_contains", ""),
+        ("icontains", ""),
+        ("starts_with", ""),
+        ("regex", ""),
+        ("regex", ".*"),
+        ("regex", "a*"),
+        ("regex", "(?s).?"),
+    ],
+)
+def test_vacuous_needles_are_rejected(kind, arg):
+    # An empty needle (or a pattern that matches anything) would pass every output.
+    with pytest.raises(AssertionConfigError, match=r"empty string would match every output|matches any text"):
+        build_check(kind, arg)
+
+
+def test_meaningful_empty_values_are_still_allowed():
+    assert build_check("equals", "").run("").passed
+    assert not build_check("equals", "").run("text").passed
+    assert build_check("one_of", ["", "none"]).run("  ").passed
+    assert not build_check("regex", "^$").run("text").passed
+
+
+@pytest.mark.parametrize("output", ["NaN", "Infinity", "-Infinity", '{"score": NaN}', "[1, Infinity]"])
+def test_json_rejects_nan_and_infinity(output):
+    result = check("json_valid", None, output)
+    assert not result.passed
+    assert "is not allowed (JSON has no NaN or Infinity)" in result.detail
+    assert not check("json_field", {"path": "score", "type": "number"}, output).passed
 
 
 def test_split_path_accepts_brackets_and_dots():

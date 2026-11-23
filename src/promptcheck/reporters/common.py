@@ -2,7 +2,27 @@
 
 from __future__ import annotations
 
+import re
+
 from promptcheck.runner import CaseResult, RunResult
+
+# C0/C1 control characters (except tab and newline), DEL, and bidirectional overrides.
+_CONTROL = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
+
+
+def clean_terminal(text: str) -> str:
+    """Make untrusted text (model output) safe to print to a terminal.
+
+    Escape sequences in model output could otherwise recolour the terminal, rewrite
+    earlier lines (carriage returns), change the window title or reorder text.
+    Each control character is shown as a visible escape such as ``\\x1b``.
+    """
+
+    def visible(match: re.Match[str]) -> str:
+        code = ord(match.group(0))
+        return f"\\x{code:02x}" if code < 0x100 else f"\\u{code:04x}"
+
+    return _CONTROL.sub(visible, text)
 
 
 def percent(value: float) -> str:

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import http.client
+import json
+import time
 import urllib.error
-import urllib.request
 from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 
 import pytest
 
 from promptcheck.errors import ProviderError, ProviderHTTPError
+from promptcheck.providers import http as pc_http
 from promptcheck.providers.http import (
     RetryPolicy,
     error_message,
@@ -17,7 +20,7 @@ from promptcheck.providers.http import (
     redact,
 )
 
-from .conftest import FakeOpener, FakeResponse, http_error
+from .conftest import FakeOpener, FakeResponse, StubServer, http_error
 
 NO_JITTER = RetryPolicy(retries=3, backoff=1.0, max_delay=30.0, jitter=False)
 
@@ -144,7 +147,113 @@ def test_helpers():
     assert error_message(b"") == "no response body"
 
 
-def test_default_opener_is_urllib(monkeypatch):
+def test_default_opener_is_the_module_urlopen(monkeypatch):
     opener = FakeOpener({"via": "urlopen"})
-    monkeypatch.setattr(urllib.request, "urlopen", opener)
+    monkeypatch.setattr(pc_http, "urlopen", opener)
     assert post_json("https://x.test", {}, policy=NO_JITTER) == {"via": "urlopen"}
+
+
+# ----------------------------------------------------------------- regression tests (QA)
+
+
+def test_redirect_is_not_followed_and_is_explained():
+    opener = FakeOpener(http_error(307, headers={"Location": "https://elsewhere.example/v1/chat"}))
+    with pytest.raises(ProviderHTTPError) as info:
+        call(opener)
+    assert info.value.status == 307
+    assert "redirected to https://elsewhere.example/v1/chat" in str(info.value)
+    assert "does not follow redirects" in str(info.value)
+    assert len(opener.requests) == 1, "a redirect is not retried"
+
+
+@pytest.mark.parametrize("status", [301, 302, 307, 308])
+def test_real_redirect_does_not_leak_the_key_to_another_host(stub_server, status):
+    target = stub_server()
+    origin = stub_server()
+
+    def redirect(handler, path, body):
+        handler.send_response(status)
+        handler.send_header("Location", f"{target.url}/v1/chat/completions")
+        handler.send_header("Content-Length", "0")
+        handler.end_headers()
+
+    origin.respond = redirect
+    with pytest.raises(ProviderHTTPError, match=f"HTTP {status}: the server redirected to"):
+        post_json(
+            f"{origin.url}/v1/chat/completions",
+            {"model": "m"},
+            headers={"Authorization": "Bearer sk-secret-key"},
+            policy=NO_JITTER,
+            secrets=["sk-secret-key"],
+        )
+    assert len(origin.requests) == 1
+    assert target.requests == [], "the request (and its Authorization header) must not be forwarded"
+
+
+def test_incomplete_read_is_retried():
+    opener = FakeOpener(http.client.IncompleteRead(b'{"cho', 40), {"ok": 1})
+    result, sleeps = call(opener)
+    assert result == {"ok": 1}
+    assert sleeps == [1.0]
+
+
+def test_incomplete_read_message_after_retries():
+    opener = FakeOpener(http.client.IncompleteRead(b"", 10), http.client.IncompleteRead(b"", 10))
+    with pytest.raises(ProviderError, match="the connection closed before the whole response arrived"):
+        call(opener, policy=RetryPolicy(retries=1, jitter=False))
+
+
+def test_timeout_is_a_deadline_for_the_whole_response(stub_server):
+    server = stub_server()
+
+    def trickle(handler, path, body):
+        data = json.dumps({"choices": [{"message": {"content": "x" * 200}}]}).encode()
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(data)))
+        handler.end_headers()
+        try:
+            for byte in data:
+                handler.wfile.write(bytes([byte]))
+                handler.wfile.flush()
+                time.sleep(0.05)
+        except OSError:
+            pass  # the client gave up, as it should
+
+    server.respond = trickle
+    started = time.monotonic()
+    with pytest.raises(ProviderError, match="timed out after 1s"):
+        post_json(f"{server.url}/v1", {}, timeout=1, policy=RetryPolicy(retries=0))
+    assert time.monotonic() - started < 3, "each byte arrived quickly, but the whole body took ~11s"
+
+
+def test_redaction_ignores_case():
+    assert redact("key=SK-FAKE-SECRET-1234", ["sk-fake-secret-1234"]) == "key=***"
+    opener = FakeOpener(http_error(401, {"error": {"message": "bad key SK-FAKE-SECRET-1234"}}))
+    with pytest.raises(ProviderHTTPError) as info:
+        call(opener, secrets=["sk-fake-secret-1234"])
+    assert "SECRET" not in str(info.value)
+
+
+def test_body_shorter_than_content_length_is_retried(stub_server):
+    server = stub_server()
+    calls = []
+
+    def truncated(handler, path, body):
+        calls.append(path)
+        if len(calls) == 1:
+            handler.send_response(200)
+            handler.send_header("Content-Type", "application/json")
+            handler.send_header("Content-Length", "500")
+            handler.end_headers()
+            handler.wfile.write(b'{"choices": [')
+            handler.wfile.flush()
+            handler.close_connection = True
+            return
+        StubServer.reply_json(handler, path, body, payload={"ok": 2})
+
+    server.respond = truncated
+    sleeps: list[float] = []
+    result = post_json(f"{server.url}/v1", {}, policy=NO_JITTER, sleep=sleeps.append)
+    assert result == {"ok": 2}
+    assert len(calls) == 2 and sleeps == [1.0]

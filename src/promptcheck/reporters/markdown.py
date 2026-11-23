@@ -2,36 +2,62 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
-from promptcheck.reporters.common import duration, excerpt, percent, samples_text, summary_line
+from promptcheck.files import atomic_write_text
+from promptcheck.reporters.common import (
+    clean_terminal,
+    duration,
+    excerpt,
+    percent,
+    samples_text,
+    summary_line,
+)
 from promptcheck.runner import ERROR, FAIL, PASS, RunResult
 
 ICONS = {PASS: "✅", FAIL: "❌", ERROR: "⚠️"}
 
+_MARKDOWN_PUNCTUATION = re.compile(r"([\\`*_\[\]|~#!])")
 
-def _cell(text: str) -> str:
-    """Make text safe inside a Markdown table cell."""
-    return " ".join(text.replace("|", "\\|").split())
+
+def _text(text: str) -> str:
+    """Escape untrusted text for use in Markdown prose or a table cell.
+
+    Model output may contain HTML (``<!--`` would hide the rest of a PR comment),
+    Markdown syntax or pipes, so HTML-significant characters become entities and
+    Markdown punctuation is backslash-escaped.
+    """
+    flat = " ".join(clean_terminal(text).split())
+    flat = flat.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return _MARKDOWN_PUNCTUATION.sub(r"\\\1", flat)
+
+
+def _code(text: str, in_table: bool = False) -> str:
+    """Render ``text`` as an inline code span that cannot be broken by backticks."""
+    flat = " ".join(clean_terminal(text).split())
+    if in_table:
+        flat = flat.replace("|", "\\|")
+    longest = max((len(run) for run in re.findall(r"`+", flat)), default=0)
+    ticks = "`" * (longest + 1)
+    pad = " " if flat.startswith("`") or flat.endswith("`") else ""
+    return f"{ticks}{pad}{flat}{pad}{ticks}"
 
 
 def _fence(text: str) -> str:
-    longest = 2
-    run = 0
-    for char in text:
-        run = run + 1 if char == "`" else 0
-        longest = max(longest, run)
-    return "`" * (longest + 1)
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    return "`" * max(3, longest + 1)
 
 
 def render_markdown(run: RunResult, min_pass_rate: float = 1.0) -> str:
     ok = run.ok(min_pass_rate)
     verdict = "passed" if ok else "failed"
+    model = f" · {_code(run.model)}" if run.model else ""
     lines = [
-        f"## {ICONS[PASS] if ok else ICONS[FAIL]} promptcheck {verdict}: {run.suite.name}",
+        f"## {ICONS[PASS] if ok else ICONS[FAIL]} promptcheck {verdict}: {_text(run.suite.name)}",
         "",
         f"**{run.passed}/{run.total} cases passed ({percent(run.pass_rate)})** · {summary_line(run)}"
-        f" · {run.provider}" + (f" · `{run.model}`" if run.model else "") + f" · {duration(run.duration_s)}",
+        f" · {_text(run.provider)}{model} · {duration(run.duration_s)}",
         "",
     ]
     if min_pass_rate < 1:
@@ -43,39 +69,37 @@ def render_markdown(run: RunResult, min_pass_rate: float = 1.0) -> str:
         if len(case.samples) > 1:
             samples += f" ({percent(case.pass_rate)})"
         lines.append(
-            f"| {ICONS[case.status]} | `{_cell(case.case.id)}` | {samples} | {_cell(excerpt(result, 160))} |"
+            f"| {ICONS[case.status]} | {_code(case.case.id, in_table=True)} | {samples} "
+            f"| {_text(excerpt(result, 160))} |"
         )
     failing = [c for c in run.cases if c.status != PASS]
     if failing:
         lines += ["", "<details>", f"<summary>Details for {len(failing)} failing case(s)</summary>", ""]
         for case in failing:
-            lines += [f"#### `{case.case.id}`", ""]
+            lines += [f"#### {_code(case.case.id)}", ""]
             if case.case.description:
-                lines += [case.case.description, ""]
+                lines += [_text(case.case.description), ""]
             for sample in case.samples:
                 if sample.status == PASS:
                     continue
                 label = f"Sample {sample.index + 1}: " if len(case.samples) > 1 else ""
                 if sample.error:
-                    lines += [f"- {label}error: {_cell(sample.error)}"]
+                    lines += [f"- {label}error: {_text(sample.error)}"]
                     continue
                 for failure in sample.failures:
-                    detail = f": {failure.detail}" if failure.detail else ""
-                    lines.append(f"- {label}`{_cell(failure.label)}`{_cell(detail)}")
+                    detail = f": {_text(failure.detail)}" if failure.detail else ""
+                    lines.append(f"- {label}{_code(failure.label)}{detail}")
                 if sample.output is not None:
-                    output = excerpt(sample.output, 1200) or "(empty output)"
+                    output = clean_terminal(excerpt(sample.output, 1200)) or "(empty output)"
                     fence = _fence(output)
                     lines += ["", fence, output, fence, ""]
         lines += ["</details>"]
     warnings = sorted({w for c in run.cases for w in c.warnings} | set(run.notices))
     if warnings:
-        lines += ["", "**Notes**", ""] + [f"- {_cell(w)}" for w in warnings]
+        lines += ["", "**Notes**", ""] + [f"- {_text(w)}" for w in warnings]
     lines += ["", "<sub>Generated by [promptcheck](https://github.com/Michealjunior/promptcheck)</sub>", ""]
     return "\n".join(lines)
 
 
 def write_markdown(run: RunResult, path: str | Path, min_pass_rate: float = 1.0) -> Path:
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(render_markdown(run, min_pass_rate), encoding="utf-8")
-    return target
+    return atomic_write_text(path, render_markdown(run, min_pass_rate))

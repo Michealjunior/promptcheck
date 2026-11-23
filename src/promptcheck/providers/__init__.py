@@ -45,7 +45,9 @@ def create_provider(
         raise ConfigError(f"--replay only works with --provider replay (got --provider {chosen})")
     # A base_url in the suite belongs to the suite's provider; don't leak it into another one.
     same_provider = chosen == settings.name
-    resolved_url = base_url or (settings.base_url if same_provider else None)
+    # An explicit base URL (even an empty one) is never replaced by a default: the
+    # provider validates it, so a typo cannot silently send the API key elsewhere.
+    resolved_url = base_url if base_url is not None else (settings.base_url if same_provider else None)
     key_env = settings.api_key_env if same_provider else None
     resolved_model = model or settings.model
     if chosen == "anthropic":

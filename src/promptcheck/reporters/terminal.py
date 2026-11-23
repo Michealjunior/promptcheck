@@ -7,7 +7,15 @@ import sys
 from typing import TextIO
 
 from promptcheck import __version__
-from promptcheck.reporters.common import duration, excerpt, latency, percent, rate_note, summary_line
+from promptcheck.reporters.common import (
+    clean_terminal,
+    duration,
+    excerpt,
+    latency,
+    percent,
+    rate_note,
+    summary_line,
+)
 from promptcheck.runner import ERROR, FAIL, PASS, CaseResult, RunResult
 
 _CODES = {
@@ -104,7 +112,7 @@ class TerminalReporter:
             return
         dot = f" {self.sym('dot')} "
         title = self.style(f"promptcheck {__version__}", "bold")
-        meta = dot.join(x for x in (run_suite_name, provider, model) if x)
+        meta = clean_terminal(dot.join(x for x in (run_suite_name, provider, model) if x))
         self.write(f"{title}{dot}{meta}")
         case_noun = "case" if cases == 1 else "cases"
         sample_noun = "sample" if samples == 1 else "samples"
@@ -115,16 +123,28 @@ class TerminalReporter:
         self, run: RunResult, outputs: dict[str, str] | None = None, min_pass_rate: float = 1.0
     ) -> None:
         if not self.quiet:
-            width = max([len(c.case.id) for c in run.cases] + [10])
+            width = max([len(clean_terminal(c.case.id)) for c in run.cases] + [10])
             for case in run.cases:
                 self._case(case, width)
             for notice in run.notices:
-                self.write(self.style(f"{self.sym('warn')} note: {notice}", "yellow"))
+                self.write(self.style(f"{self.sym('warn')} note: {clean_terminal(notice)}", "yellow"))
             self.write(self.style(self.sym("rule") * 60, "dim"))
         self._summary(run, min_pass_rate)
-        if outputs and not self.quiet:
-            for label, path in outputs.items():
-                self.write(self.style(f"  {label:<11}{path}", "dim"))
+        self.outputs(outputs or {})
+
+    def outputs(self, written: dict[str, str]) -> None:
+        """List the report files that were written."""
+        if self.quiet:
+            return
+        for label, path in written.items():
+            self.write(self.style(f"  {label:<11}{clean_terminal(path)}", "dim"))
+
+    def interrupted(self, completed: int, total: int) -> None:
+        self.write()
+        self.write(
+            f"{self.style('INTERRUPTED', 'bold', 'yellow')}  after {completed} of {total} samples; "
+            "no reports or recordings were written"
+        )
 
     def _badge(self, status: str) -> str:
         text = {PASS: " PASS ", FAIL: " FAIL ", ERROR: " ERR  "}[status]
@@ -137,10 +157,11 @@ class TerminalReporter:
         note = rate_note(case)
         timing = latency(case.latency_ms)
         tail = "  ".join(x for x in (counts, note, timing) if x)
-        self.write(f"{self._badge(case.status)} {case.case.id:<{width}}  {self.style(tail, 'dim')}")
+        case_id = clean_terminal(case.case.id)
+        self.write(f"{self._badge(case.status)} {case_id:<{width}}  {self.style(tail, 'dim')}")
         indent = " " * (7 if self.color else 5)
         for warning in case.warnings:
-            self.write(indent + self.style(f"{self.sym('warn')} {warning}", "yellow"))
+            self.write(indent + self.style(f"{self.sym('warn')} {clean_terminal(warning)}", "yellow"))
         failing = [s for s in case.samples if s.status != PASS]
         if case.passed and not failing and not self.verbose:
             return
@@ -155,7 +176,8 @@ class TerminalReporter:
             shown += 1
             prefix = f"sample {sample.index + 1}: " if len(case.samples) > 1 else ""
             if sample.error:
-                self.write(indent + self.style(f"{self.sym('bad')} {prefix}error: {sample.error}", "yellow"))
+                error = clean_terminal(sample.error)
+                self.write(indent + self.style(f"{self.sym('bad')} {prefix}error: {error}", "yellow"))
                 continue
             for result in sample.assertions:
                 if result.passed and not self.verbose:
@@ -165,13 +187,13 @@ class TerminalReporter:
                     if result.passed
                     else self.style(self.sym("bad"), "red")
                 )
-                detail = f": {result.detail}" if result.detail else ""
+                detail = f": {clean_terminal(result.detail)}" if result.detail else ""
                 if result.passed:
                     detail = self.style(detail, "dim")
-                self.write(f"{indent}{mark} {prefix}{result.label}{detail}")
+                self.write(f"{indent}{mark} {prefix}{clean_terminal(result.label)}{detail}")
             if sample.output is not None and (sample.status != PASS or self.verbose):
-                text = sample.output if self.verbose else excerpt(sample.output)
-                for line in (text or "(empty output)").splitlines() or [""]:
+                text = clean_terminal(sample.output if self.verbose else excerpt(sample.output))
+                for line in (text or "(empty output)").split("\n"):
                     self.write(
                         indent + self.style("│ " if self.unicode else "| ", "dim") + self.style(line, "dim")
                     )

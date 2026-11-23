@@ -33,7 +33,7 @@ dependencies = ["PyYAML>=6.0"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]
-promptcheck = "promptcheck.cli:main"
+promptcheck = "promptcheck.cli:entry"
 
 [project.urls]
 Homepage = "https://michealjunior.github.io/promptcheck/"

@@ -108,7 +108,7 @@ def test_markdown_summary(example_run):
     assert md.startswith("## ❌ promptcheck failed: Helpdesk assistant")
     assert "**6/9 cases passed (66.7%)**" in md
     assert "| ✅ | `triage-double-charge` | 1/1 | all assertions passed |" in md
-    assert '| ❌ | `triage-checkout-outage` | 0/1 | json_field priority equals "urgent": got "high" |' in md
+    assert '| ❌ | `triage-checkout-outage` | 0/1 | json\\_field priority equals "urgent": got "high" |' in md
     assert "| ✅ | `triage-ambiguous-ticket` | 4/5 (80%) | flaky but within threshold |" in md
     assert "<details>" in md and "Details for 3 failing case(s)" in md
     assert "104 words, limit is 60" in md
@@ -254,3 +254,66 @@ def test_use_color(environ, tty, expected):
 
 def test_use_color_flag_wins():
     assert use_color(_Tty(), force=False, environ={}) is False
+
+
+# ----------------------------------------------------------------- regression tests (QA)
+
+ESCAPES = "\x1b]0;pwned-title\x07\x1b[2J\x1b[31mRED\rOVERWRITE \u202eevil"
+
+
+@pytest.fixture
+def injection_run(make_suite) -> RunResult:
+    suite = make_suite(
+        """
+        name: Injection
+        cases:
+          - id: terminal
+            prompt: hi
+            assert: [{equals: positive}]
+          - id: comment
+            prompt: hi
+            assert: [{equals: positive}]
+          - id: "tick`id|pipe"
+            prompt: hi
+            assert: [{contains: hello}]
+        """
+    )
+    outputs = {
+        "terminal": ESCAPES,
+        "comment": "<!-- hidden <img src=x onerror=alert(1)> **bold**",
+        "tick`id|pipe": "nope",
+    }
+    return run_suite(suite, FakeProvider(outputs))
+
+
+@pytest.mark.parametrize("color", [False, True])
+def test_terminal_escapes_model_control_characters(injection_run, color):
+    stream = io.StringIO()
+    TerminalReporter(stream, color=color).report(injection_run)
+    out = stream.getvalue()
+    for raw in ("\x1b]0;", "\x1b[2J", "\x1b[31mRED", "\x07", "\r", "\u202e"):
+        assert raw not in out, f"raw control sequence {raw!r} reached the terminal"
+    assert "\\x1b]0;pwned-title\\x07" in out
+    assert "\\x0dOVERWRITE" in out
+    assert "\\u202eevil" in out
+
+
+def test_markdown_escapes_html_and_markdown_from_model_output(injection_run):
+    md = render_markdown(injection_run)
+    outside_code = re.sub(r"(?ms)^(`{3,})\n.*?^\1$", "", md)
+    assert "<!--" not in outside_code, "an HTML comment would hide the rest of the PR comment"
+    assert "<img" not in outside_code
+    assert "&lt;\\!--" in md, "rendered as the literal text <!--"
+    assert "\\*\\*bold\\*\\*" in md
+    assert "\x1b" not in md
+    row = next(line for line in md.splitlines() if "tick" in line and line.startswith("|"))
+    assert "``tick`id\\|pipe``" in row, "ids with backticks or pipes stay inside one code span and cell"
+    assert len(re.findall(r"(?<!\\)\|", row)) == 5, "the table row keeps exactly four cells"
+    assert "#### ``tick`id|pipe``" in md
+
+
+def test_html_report_escapes_injection(injection_run):
+    page = render_html(injection_run)
+    assert "<!-- hidden" not in page
+    assert "&lt;!-- hidden" in page
+    assert "<img src=x" not in page

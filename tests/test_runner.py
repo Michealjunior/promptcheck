@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import dataclasses
 import threading
 import time
 
+import pytest
+
 from promptcheck.errors import ProviderError
 from promptcheck.providers.base import Completion, CompletionRequest, Provider
-from promptcheck.runner import ERROR, FAIL, PASS, run_suite
+from promptcheck.runner import ERROR, FAIL, PASS, RunInterrupted, run_suite
 
 from .conftest import FakeProvider
 
@@ -97,7 +100,10 @@ def test_errors_never_abort_the_run(make_suite):
     assert by_id["bad"].status == ERROR
     assert by_id["bad"].headline() == "error: HTTP 500: overloaded"
     assert by_id["flaky"].status == ERROR
-    assert by_id["flaky"].samples[0].error == "RuntimeError: boom"
+    assert by_id["flaky"].samples[0].error == "internal error: RuntimeError: boom"
+    assert by_id["flaky"].samples[0].internal
+    assert not by_id["bad"].samples[0].internal, "provider errors are case errors, not tool bugs"
+    assert {case_id for case_id, _, _ in run.internal_errors} == {"flaky"}
     assert by_id["too-flaky"].status == FAIL
     assert run.errored == 2
 
@@ -138,10 +144,12 @@ class SlowProvider(Provider):
         super().__init__()
         self.active = 0
         self.peak = 0
+        self.calls = 0
         self.lock = threading.Lock()
 
     def complete(self, request: CompletionRequest) -> Completion:
         with self.lock:
+            self.calls += 1
             self.active += 1
             self.peak = max(self.peak, self.active)
         time.sleep(0.03)
@@ -165,3 +173,36 @@ def test_progress_callback(make_suite):
     run_suite(make_suite(SUITE), FakeProvider(OUTPUTS), on_sample=lambda d, t: seen.append((d, t)))
     assert seen[-1] == (11, 11)
     assert [d for d, _ in seen] == list(range(1, 12))
+
+
+# ----------------------------------------------------------------- regression tests (QA)
+
+
+def test_interrupt_cancels_queued_requests(make_suite):
+    # M6: Ctrl-C used to let every queued request run (12/12 sent, 13.6 s to exit).
+    suite = make_suite(
+        "name: Many\ndefaults: {model: m}\ncases:\n"
+        + "".join(f"  - {{id: c{i}, prompt: hi, assert: [{{min_words: 1}}]}}\n" for i in range(20))
+    )
+    provider = SlowProvider()
+
+    def interrupt(done: int, total: int) -> None:
+        raise KeyboardInterrupt
+
+    started = time.monotonic()
+    with pytest.raises(RunInterrupted) as info:
+        run_suite(suite, provider, concurrency=2, on_sample=interrupt)
+    time.sleep(0.2)  # let any in-flight request finish
+    assert info.value.total == 20
+    assert info.value.completed == 1
+    assert provider.calls <= 4, f"queued requests must be cancelled, {provider.calls} were sent"
+    assert time.monotonic() - started < 1
+
+
+def test_case_with_no_passing_sample_never_passes(make_suite):
+    suite = make_suite("name: E\ncases:\n  - {id: e, prompt: hi, assert: [json_valid]}\n")
+    lenient = dataclasses.replace(suite.cases[0], pass_rate=0.0)  # bypassing validation on purpose
+    run = run_suite(suite, FakeProvider({}, raise_for={"e": ProviderError("HTTP 500")}), cases=[lenient])
+    assert run.cases[0].status == ERROR
+    assert not run.cases[0].passed
+    assert not run.ok(0.0001)

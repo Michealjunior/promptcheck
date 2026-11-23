@@ -17,41 +17,42 @@ from typing import Any, ClassVar
 REFUSAL_WINDOW = 300
 """Number of leading characters scanned by the refusal heuristic."""
 
-REFUSAL_PHRASES: tuple[str, ...] = (
-    "i can't help with",
-    "i cannot help with",
-    "i can't help you with",
-    "i cannot help you with",
-    "i can't assist with",
-    "i cannot assist with",
-    "i'm unable to help",
-    "i am unable to help",
-    "i'm unable to assist",
-    "i am unable to assist",
-    "i'm not able to help",
-    "i am not able to help",
-    "i can't provide",
-    "i cannot provide",
-    "i can't share",
-    "i cannot share",
-    "i can't comply",
-    "i cannot comply",
-    "i can't do that",
-    "i cannot do that",
-    "i won't be able to",
-    "i'm sorry, but i can't",
-    "i'm sorry, but i cannot",
-    "i apologize, but i can't",
-    "i apologise, but i can't",
-    "sorry, i can't",
-    "i must decline",
-    "i have to decline",
-    "i'm not allowed to",
-    "i am not allowed to",
-    "that's not something i can help with",
-    "as an ai language model",
+_REFUSAL_VERBS = (
+    "help|assist|provide|share|do|comply|fulfil|fulfill|reveal|disclose|give|answer|support|"
+    "create|generate|write|continue|engage|discuss|tell|process|complete|offer|show|make|"
+    "produce|print|repeat|follow|accommodate|participate|release|expose|output|grant|perform"
 )
-"""Lower-case phrases that mark a reply as a refusal (see :func:`detect_refusal`)."""
+_SOFTENER = (
+    r"(?:(?:i'm|i am|we're|we are)\s+(?:so\s+|very\s+|really\s+|truly\s+)?(?:sorry|afraid)"
+    r"|(?:i|we)\s+(?:sincerely\s+)?apologi[sz]e|(?:so\s+|very\s+|really\s+)?sorry"
+    r"|unfortunately|regrettably|apologies)"
+)
+_INABILITY = (
+    r"(?:can't|cannot|can\s+not|won't|will\s+not|must\s+not|am\s+(?:not\s+able|unable|not\s+going"
+    r"|not\s+allowed|not\s+permitted)\s+to)"
+)
+_REFUSAL_START = re.compile(
+    rf"(?:{_SOFTENER}\s*[,.!:;\u2014-]?\s*(?:but\s+|however,?\s+)?)?"
+    r"(?:"
+    rf"i\s+{_INABILITY}\s+(?:be\s+able\s+to\s+)?(?:{_REFUSAL_VERBS})\b"
+    rf"|i'm\s+(?:not\s+able|unable|not\s+going|not\s+allowed|not\s+permitted)\s+to\s+(?:{_REFUSAL_VERBS})\b"
+    r"|i\s+(?:must|have\s+to|need\s+to|will|'ll)\s+(?:respectfully\s+|politely\s+)?decline\b"
+    r"|i'll\s+(?:have\s+to\s+)?(?:respectfully\s+)?decline\b"
+    r"|i\s+(?:respectfully\s+)?decline\s+to\b"
+    r"|(?:i'm|i\s+am)\s+not\s+comfortable\b"
+    r"|i\s+don't\s+feel\s+comfortable\b"
+    rf"|(?:that's|that\s+is|this\s+is)\s+not\s+something\s+i\s+(?:can|am\s+able\s+to|will)\s+"
+    rf"(?:{_REFUSAL_VERBS})\b"
+    r")"
+)
+"""A first-person refusal at the start of a sentence, optionally after an apology."""
+
+_REDIRECT = re.compile(
+    r"\b(?:but|however,?|instead,?)\s+(?:you\s+can|you\s+could|here's|here\s+is|here\s+are)\b"
+)
+_APOSTROPHES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'", "\u00b4": "'", "`": "'"})
+_LEADING_MARKUP = re.compile(r"^[\s*_#>]+")
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+|\n\s*\n")
 
 JSON_TYPES: dict[str, str] = {
     "string": "a string",
@@ -86,18 +87,37 @@ def quote(text: str, limit: int = 60) -> str:
     return json.dumps(flat, ensure_ascii=False)
 
 
-def detect_refusal(output: str) -> str | None:
-    """Return the refusal phrase found near the start of ``output``, if any.
+def _normalise(text: str) -> str:
+    text = text[:REFUSAL_WINDOW].translate(_APOSTROPHES).lower()
+    return _LEADING_MARKUP.sub("", text)
 
-    The heuristic lower-cases the first :data:`REFUSAL_WINDOW` characters,
-    normalises curly apostrophes and looks for any entry of
-    :data:`REFUSAL_PHRASES`. It is intentionally conservative and English-only.
+
+def detect_refusal(output: str) -> str | None:
+    """Return the refusal wording that opens ``output``, if any.
+
+    English-only heuristic. A reply counts as a refusal when its first sentence,
+    or its second sentence after a short opener such as "Thanks for asking!",
+    starts with a first-person refusal: optionally an apology ("I'm sorry, but",
+    "Unfortunately,") followed by "I can't / cannot / won't / am unable to /
+    am not able to / am not going to" plus a verb such as help, assist, provide,
+    share, do, comply, reveal or disclose, or by "I must decline". Refusal
+    wording that appears later, inside quotes, or that is followed by a
+    redirection ("..., but you can ...", "..., but here's how") does not count.
+    Only the first :data:`REFUSAL_WINDOW` characters are examined.
     """
-    head = output[:REFUSAL_WINDOW].lower().replace("’", "'").replace("‘", "'")
-    head = " ".join(head.split())
-    for phrase in REFUSAL_PHRASES:
-        if phrase in head:
-            return phrase
+    text = _normalise(output)
+    sentences = [s for s in _SENTENCE_END.split(text) if s.strip()][:2]
+    for index, sentence in enumerate(sentences):
+        sentence = " ".join(sentence.split())
+        if index == 1:
+            opener = " ".join(sentences[0].split())
+            if len(opener) > 80 or ":" in opener:
+                break
+        match = _REFUSAL_START.match(sentence)
+        if match:
+            if _REDIRECT.search(sentence, match.end()):
+                return None
+            return match.group(0)
     return None
 
 
@@ -105,11 +125,22 @@ def word_count(output: str) -> int:
     return len(output.split())
 
 
+class _NonStandardNumber(ValueError):
+    pass
+
+
+def _reject_constant(name: str) -> Any:
+    # Python's json module accepts NaN, Infinity and -Infinity; strict JSON does not.
+    raise _NonStandardNumber(name)
+
+
 def parse_json_output(output: str) -> tuple[Any, str | None]:
     """Parse ``output`` as JSON. Returns ``(value, error_message)``."""
     text = output.strip()
     try:
-        return json.loads(text), None
+        return json.loads(text, parse_constant=_reject_constant), None
+    except _NonStandardNumber as exc:
+        return None, f"output is not valid JSON: {exc} is not allowed (JSON has no NaN or Infinity)"
     except json.JSONDecodeError as exc:
         if not text:
             message = "output is empty, expected JSON"
@@ -120,18 +151,23 @@ def parse_json_output(output: str) -> tuple[Any, str | None]:
         return None, message
 
 
-def _scalar_text(value: Any, kind: str, what: str = "a string") -> str:
+def _scalar_text(value: Any, kind: str, what: str = "a string", allow_empty: bool = True) -> str:
     if isinstance(value, bool) or value is None or not isinstance(value, (str, int, float)):
         raise AssertionConfigError(f"'{kind}' expects {what}, got {_describe(value)}")
-    return str(value)
+    text = str(value)
+    if not allow_empty and text == "":
+        raise AssertionConfigError(
+            f"'{kind}' needs a non-empty string; an empty string would match every output"
+        )
+    return text
 
 
 def _text_list(value: Any, kind: str) -> list[str]:
     if isinstance(value, list):
         if not value:
             raise AssertionConfigError(f"'{kind}' expects a string or a non-empty list of strings")
-        return [_scalar_text(item, kind, "strings") for item in value]
-    return [_scalar_text(value, kind, "a string or a list of strings")]
+        return [_scalar_text(item, kind, "strings", allow_empty=False) for item in value]
+    return [_scalar_text(value, kind, "a string or a list of strings", allow_empty=False)]
 
 
 def _positive_int(value: Any, kind: str) -> int:
@@ -233,16 +269,24 @@ class NotContains(Check):
         return True, ""
 
 
+_VACUITY_PROBES = ("", "x", "\n", "Lorem ipsum dolor sit amet", "{}", "0")
+
+
 class Regex(Check):
     kind = "regex"
 
     def __init__(self, arg: Any) -> None:
         super().__init__(arg)
-        pattern = _scalar_text(arg, self.kind, "a regular expression string")
+        pattern = _scalar_text(arg, self.kind, "a regular expression string", allow_empty=False)
         try:
             self.pattern = re.compile(pattern)
         except re.error as exc:
             raise AssertionConfigError(f"'regex' pattern {quote(pattern)} is invalid: {exc}") from exc
+        if all(self.pattern.search(probe) for probe in _VACUITY_PROBES):
+            raise AssertionConfigError(
+                f"'regex' pattern {quote(pattern)} matches any text (even an empty output), "
+                "so it can never fail"
+            )
 
     def label(self) -> str:
         return f"regex /{self.pattern.pattern}/"
@@ -274,7 +318,7 @@ class StartsWith(Check):
 
     def __init__(self, arg: Any) -> None:
         super().__init__(arg)
-        self.prefix = _scalar_text(arg, self.kind)
+        self.prefix = _scalar_text(arg, self.kind, allow_empty=False)
 
     def label(self) -> str:
         return f"starts_with {quote(self.prefix, 40)}"

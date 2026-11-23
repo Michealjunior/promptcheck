@@ -13,7 +13,8 @@ from urllib.parse import urlparse
 
 from promptcheck.errors import ConfigError, ProviderError
 from promptcheck.providers import http
-from promptcheck.providers.base import Completion, CompletionRequest, Provider
+from promptcheck.providers.base import Completion, CompletionRequest, Provider, scrub_secret
+from promptcheck.urls import validate_base_url
 
 
 @dataclass(frozen=True)
@@ -51,7 +52,13 @@ class OpenAICompatibleProvider(Provider):
         env = os.environ if environ is None else environ
         self.name = preset
         self.model = model
-        self.base_url = (base_url or defaults.base_url).rstrip("/")
+        if base_url is None:
+            self.base_url = defaults.base_url
+        else:
+            try:
+                self.base_url = validate_base_url(base_url)
+            except ValueError as exc:
+                raise ConfigError(f"base URL {exc}") from None
         self.policy = policy or http.RetryPolicy()
         self.api_key_env = api_key_env or defaults.api_key_env
         self._api_key = env.get(self.api_key_env) if self.api_key_env else None
@@ -104,29 +111,57 @@ class OpenAICompatibleProvider(Provider):
         if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
             raise ProviderError("unexpected response: no 'choices' in the completion")
         choice = choices[0]
-        message = choice.get("message") or {}
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            raise ProviderError("unexpected response: the first choice has no 'message' object")
+        finish = choice.get("finish_reason") if isinstance(choice.get("finish_reason"), str) else None
+        refusal = message.get("refusal")
+        refusal_text = refusal if isinstance(refusal, str) and refusal.strip() else None
+        refused = refusal_text is not None or finish == "content_filter"
+        tool_calls = _tool_names(message)
         content = message.get("content")
         if isinstance(content, list):  # some servers return content parts
-            content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
-        text = content if isinstance(content, str) else ""
-        refusal = message.get("refusal")
-        finish = choice.get("finish_reason")
-        refused = bool(refusal) or finish == "content_filter"
-        if not text and isinstance(refusal, str):
-            text = refusal
+            texts = [
+                part.get("text")
+                for part in content
+                if isinstance(part, dict) and part.get("type", "text") == "text"
+            ]
+            if not texts or not all(isinstance(t, str) for t in texts):
+                raise ProviderError("unexpected response: the message content parts contain no text")
+            content = "".join(texts)
+        if content is not None and not isinstance(content, str):
+            raise ProviderError(f"unexpected response: message content is {type(content).__name__}, not text")
+        text = content or ""
+        if not text.strip() and tool_calls:
+            raise ProviderError(
+                f"the model called a tool ({', '.join(tool_calls)}) instead of replying with text "
+                f"(finish_reason={finish or 'missing'}); promptcheck grades text replies"
+            )
+        if content is None:
+            if refusal_text is not None:
+                text = refusal_text
+            elif finish != "content_filter":
+                raise ProviderError(
+                    f"the response has no message content (finish_reason={finish or 'missing'}), "
+                    "so there is nothing to grade"
+                )
+        elif not text and refusal_text is not None:
+            text = refusal_text
         warnings = []
         if finish == "length":
             warnings.append("output was cut off by max_tokens (finish_reason=length)")
         if finish == "content_filter":
             warnings.append("the provider's content filter stopped this output")
+        if tool_calls:
+            warnings.append(f"the model also requested tool calls: {', '.join(tool_calls)}")
         usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
         return Completion(
             text=text,
             model=data.get("model") if isinstance(data.get("model"), str) else None,
             refused=refused,
-            finish_reason=finish if isinstance(finish, str) else None,
-            input_tokens=usage.get("prompt_tokens"),
-            output_tokens=usage.get("completion_tokens"),
+            finish_reason=finish,
+            input_tokens=_int_or_none(usage.get("prompt_tokens")),
+            output_tokens=_int_or_none(usage.get("completion_tokens")),
             warnings=warnings,
         )
 
@@ -139,4 +174,23 @@ class OpenAICompatibleProvider(Provider):
             policy=self.policy,
             secrets=(self._api_key,),
         )
-        return self.parse_response(data)
+        return scrub_secret(self.parse_response(data), self._api_key)
+
+
+def _tool_names(message: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    calls = message.get("tool_calls")
+    if isinstance(calls, list):
+        for call in calls:
+            function = call.get("function") if isinstance(call, dict) else None
+            name = function.get("name") if isinstance(function, dict) else None
+            names.append(name if isinstance(name, str) and name else "unnamed tool")
+    legacy = message.get("function_call")
+    if isinstance(legacy, dict):
+        name = legacy.get("name")
+        names.append(name if isinstance(name, str) and name else "unnamed function")
+    return names
+
+
+def _int_or_none(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None

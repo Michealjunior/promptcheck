@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import urllib.request
+import re
 
 import pytest
 
@@ -11,6 +11,7 @@ from promptcheck.providers import (
     ReplayProvider,
     RetryPolicy,
     create_provider,
+    http,
 )
 from promptcheck.providers.base import CompletionRequest
 from promptcheck.suite import ProviderSettings
@@ -67,7 +68,7 @@ ANTHROPIC_OK = {
 @pytest.fixture
 def opener(monkeypatch):
     fake = FakeOpener()
-    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    monkeypatch.setattr(http, "urlopen", fake)
     return fake
 
 
@@ -314,3 +315,133 @@ def test_factory_replay_misuse():
         create_provider(ProviderSettings(name="replay"))
     with pytest.raises(ConfigError, match="only works with --provider replay"):
         create_provider(ProviderSettings(), name="openai", replay=EXAMPLE_RECORDINGS)
+
+
+# ----------------------------------------------------------------- regression tests (QA)
+
+
+def openai_provider(**kwargs):
+    return OpenAICompatibleProvider(model="m", environ={"OPENAI_API_KEY": KEY}, policy=FAST, **kwargs)
+
+
+TOOL_CALL = {
+    "choices": [
+        {
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}
+                ],
+            },
+            "finish_reason": "tool_calls",
+        }
+    ]
+}
+
+
+@pytest.mark.parametrize(
+    ("response", "message"),
+    [
+        (
+            TOOL_CALL,
+            "the model called a tool (lookup) instead of replying with text (finish_reason=tool_calls)",
+        ),
+        (
+            {"choices": [{"message": {"content": "", "tool_calls": [{"function": {"name": "f"}}]}}]},
+            "the model called a tool (f)",
+        ),
+        ({"choices": [{"message": {"content": None}, "finish_reason": "stop"}]}, "has no message content"),
+        ({"choices": [{"message": {}, "finish_reason": "stop"}]}, "has no message content"),
+        ({"choices": [{"finish_reason": "stop"}]}, "the first choice has no 'message' object"),
+        ({"choices": [{"message": "hello"}]}, "the first choice has no 'message' object"),
+        ({"choices": [{"message": {"content": 42}}]}, "message content is int, not text"),
+        ({"choices": [{"message": {"content": [{"type": "text", "text": None}]}}]}, "parts contain no text"),
+    ],
+)
+def test_openai_responses_without_text_are_errors_not_empty_output(response, message):
+    # M4: a tool call used to become "" and could pass not_contains / not_refusal checks.
+    with pytest.raises(ProviderError, match=re.escape(message)):
+        openai_provider().parse_response(response)
+
+
+def test_openai_tool_call_becomes_a_case_error(make_suite, opener):
+    from promptcheck.runner import run_suite
+
+    opener.script.append(TOOL_CALL)
+    suite = make_suite(
+        "name: t\ndefaults: {model: m}\ncases:\n  - {id: a, prompt: hi, assert: [not_refusal]}\n"
+    )
+    run = run_suite(suite, openai_provider())
+    assert run.cases[0].status == "error"
+    assert "called a tool" in run.cases[0].headline()
+
+
+def test_openai_content_filter_without_content_is_a_refusal():
+    completion = openai_provider().parse_response(
+        {"choices": [{"message": {"content": None}, "finish_reason": "content_filter"}]}
+    )
+    assert completion.refused and completion.text == ""
+
+
+def test_openai_text_with_tool_calls_keeps_text_and_warns():
+    completion = openai_provider().parse_response(
+        {"choices": [{"message": {"content": "Let me check.", "tool_calls": [{"function": {"name": "f"}}]}}]}
+    )
+    assert completion.text == "Let me check."
+    assert completion.warnings == ["the model also requested tool calls: f"]
+
+
+@pytest.mark.parametrize(
+    ("response", "message"),
+    [
+        (
+            {"content": [{"type": "tool_use", "name": "lookup", "input": {}}], "stop_reason": "tool_use"},
+            "the model called a tool (lookup) instead of replying with text (stop_reason=tool_use)",
+        ),
+        ({"content": [], "stop_reason": "end_turn"}, "contains no text block (stop_reason=end_turn)"),
+        ({"content": [{"type": "thinking", "thinking": ""}], "stop_reason": "max_tokens"}, "no text block"),
+    ],
+)
+def test_anthropic_responses_without_text_are_errors(response, message):
+    provider = AnthropicProvider(environ={"ANTHROPIC_API_KEY": KEY})
+    with pytest.raises(ProviderError, match=re.escape(message)):
+        provider.parse_response(response)
+
+
+@pytest.mark.parametrize(
+    ("base", "url"),
+    [
+        ("https://gateway.test", "https://gateway.test/v1/messages"),
+        ("https://gateway.test/", "https://gateway.test/v1/messages"),
+        ("https://gateway.test/v1", "https://gateway.test/v1/messages"),
+        ("https://gateway.test/anthropic/v1/", "https://gateway.test/anthropic/v1/messages"),
+    ],
+)
+def test_anthropic_base_url_never_doubles_v1(base, url):
+    provider = AnthropicProvider(base_url=base, environ={"ANTHROPIC_API_KEY": KEY})
+    assert provider.url == url
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "api.openai.com/v1", "ftp://x.test", "http://"])
+def test_empty_or_invalid_base_url_is_rejected_never_replaced(bad, opener):
+    # M7: "" used to fall back to https://api.openai.com/v1 and send the key there.
+    with pytest.raises(ConfigError, match="base URL must"):
+        create_provider(ProviderSettings(model="m"), base_url=bad, environ={"OPENAI_API_KEY": KEY})
+    with pytest.raises(ConfigError, match="base URL must"):
+        AnthropicProvider(base_url=bad, environ={"ANTHROPIC_API_KEY": KEY})
+    assert opener.requests == []
+
+
+def test_api_key_echoed_into_output_is_redacted(opener):
+    opener.script.append(
+        {
+            "choices": [
+                {"message": {"content": f"your header was Bearer {KEY.upper()}"}, "finish_reason": "stop"}
+            ]
+        }
+    )
+    completion = openai_provider().complete(request())
+    assert KEY.lower() not in completion.text.lower()
+    assert completion.text == "your header was Bearer ***"
+    assert "the response contained the API key" in completion.warnings[0]

@@ -134,7 +134,7 @@ def test_messages_form(make_suite):
                 prompt: "Ticket: {ticket}"
                 assert: [json_valid]
             """,
-            "case 'billing': prompt uses {ticket} but no variable named ticket is defined",
+            "case 'billing': prompt: {ticket} is not defined in 'vars'",
         ),
         (
             """
@@ -234,7 +234,7 @@ def test_messages_form(make_suite):
                 pass_rate: 1.5
                 assert: [json_valid]
             """,
-            "case 'billing': 'pass_rate' must be a fraction between 0 and 1",
+            "case 'billing': 'pass_rate' must be greater than 0 and at most 1",
         ),
         (
             """
@@ -261,7 +261,7 @@ def test_messages_form(make_suite):
                 prompt: hi
                 assert: [{contains: "{missing}"}]
             """,
-            "case 'billing': assertion #1 uses {missing}, which is not defined in 'vars'",
+            "case 'billing': assertion #1: {missing} is not defined in 'vars'",
         ),
         (
             """
@@ -320,7 +320,7 @@ def test_parse_rate():
     assert parse_rate("80%") == pytest.approx(0.8)
     assert parse_rate("0.25") == 0.25
     assert parse_rate(1) == 1.0
-    for bad in ("120%", -0.1, True, "abc"):
+    for bad in ("120%", -0.1, True, "abc", 0, "0%", "0", float("nan"), "nan"):
         with pytest.raises(ValueError):
             parse_rate(bad)
 
@@ -339,3 +339,200 @@ def test_example_suite_is_valid():
     assert len(suite.cases) == 9
     assert "Ledgerly" in suite.cases[0].system
     assert '{"category"' in suite.cases[0].system
+
+
+# ----------------------------------------------------------------- regression tests (QA)
+
+
+def test_duplicate_assert_key_is_rejected_with_case_and_lines(write_suite):
+    # M1: yaml.safe_load kept only the second 'assert', so the first list never ran.
+    path = write_suite(
+        """
+        name: Duplicate keys
+        cases:
+          - id: refund
+            prompt: Can I get a refund?
+            assert:
+              - icontains: refund
+              - not_refusal
+            assert:
+              - contains: "30 days"
+        """
+    )
+    with pytest.raises(SuiteError) as info:
+        load_suite(path)
+    message = str(info.value)
+    assert "case 'refund': duplicate key 'assert' at line 8 (first defined at line 5)" in message
+    assert "keep only the last one" in message
+
+
+@pytest.mark.parametrize(
+    ("text", "scope"),
+    [
+        ("name: a\nname: b\ncases: []\n", "suite: duplicate key 'name' at line 2"),
+        ("defaults:\n  model: a\n  model: b\ncases: []\n", "defaults: duplicate key 'model' at line 3"),
+        (
+            "cases:\n  - id: x\n    prompt: hi\n    vars: {a: 1, a: 2}\n    assert: [json_valid]\n",
+            "case 'x': duplicate key 'a' at line 4",
+        ),
+        (
+            "cases:\n  - prompt: hi\n    prompt: again\n    assert: [json_valid]\n",
+            "case #1: duplicate key 'prompt' at line 3",
+        ),
+    ],
+)
+def test_duplicate_keys_anywhere_are_rejected(write_suite, text, scope):
+    with pytest.raises(SuiteError, match=re.escape(scope)):
+        load_suite(write_suite(text))
+
+
+def test_merge_keys_may_be_overridden(make_suite):
+    suite = make_suite(
+        """
+        name: Anchors
+        cases:
+          - &base {id: a, prompt: hi, assert: [json_valid]}
+          - <<: *base
+            id: b
+            prompt: hello
+        """
+    )
+    assert [c.id for c in suite.cases] == ["a", "b"]
+    assert suite.cases[1].messages[0]["content"] == "hello"
+
+
+def test_null_variable_is_an_error_naming_var_and_case(make_suite):
+    # M2: a var declared without a value used to render as "" and pass vacuously.
+    message = errors_for(
+        make_suite,
+        """
+        name: Null var
+        defaults:
+          vars:
+            invoice_id:
+        cases:
+          - id: summary
+            prompt: "Summarise invoice {invoice_id}"
+            assert: [{min_words: 1}]
+        """,
+    )
+    assert "case 'summary': prompt: {invoice_id} has no value (null)" in message
+
+
+def test_null_variable_in_assertion_is_an_error(make_suite):
+    message = errors_for(
+        make_suite,
+        """
+        name: Null var
+        cases:
+          - id: summary
+            prompt: hi
+            vars: {invoice_id: null}
+            assert: [{contains: "{invoice_id}"}]
+        """,
+    )
+    assert "case 'summary': assertion #1: {invoice_id} has no value (null)" in message
+
+
+def test_empty_variable_that_empties_a_needle_is_an_error(make_suite):
+    message = errors_for(
+        make_suite,
+        """
+        name: Empty var
+        cases:
+          - id: ticket
+            prompt: "Ticket {ticket}"
+            vars: {ticket: ""}
+            assert: [{icontains: "{ticket}"}]
+        """,
+    )
+    assert "case 'ticket': assertion #1: 'icontains' needs a non-empty string" in message
+    assert "(after substituting variables)" in message
+
+
+def test_empty_needle_is_rejected_at_validation(make_suite):
+    message = errors_for(
+        make_suite,
+        """
+        name: Empty needles
+        cases:
+          - id: needles
+            prompt: hi
+            assert:
+              - contains: ""
+        """,
+    )
+    assert "case 'needles': assertion #1: 'contains' needs a non-empty string" in message
+
+
+def test_unicode_variable_names_are_substituted(make_suite):
+    suite = make_suite(
+        """
+        name: Unicode vars
+        defaults:
+          vars: {café: Ledgerly}
+        cases:
+          - id: a
+            prompt: "Hi {名前}, welcome to {café}. Literal {{名前}}."
+            vars: {名前: Taro}
+            assert: [{contains: "{café}"}]
+        """
+    )
+    assert suite.cases[0].messages[0]["content"] == "Hi Taro, welcome to Ledgerly. Literal {名前}."
+    assert suite.cases[0].checks[0].needles == ["Ledgerly"]
+
+
+def test_invalid_variable_names_are_rejected(make_suite):
+    message = errors_for(
+        make_suite, "name: x\ncases:\n  - {id: a, prompt: hi, vars: {1abc: x}, assert: [json_valid]}\n"
+    )
+    assert "variable name '1abc' must be an identifier" in message
+
+
+@pytest.mark.parametrize("rate", ["0", "0%", "0.0"])
+def test_zero_pass_rate_is_rejected(make_suite, rate):
+    message = errors_for(
+        make_suite, f"name: x\ncases:\n  - {{id: a, prompt: hi, pass_rate: {rate}, assert: [json_valid]}}\n"
+    )
+    assert "'pass_rate' must be greater than 0 and at most 1" in message
+
+
+def test_utf16_suite_has_a_clear_error(tmp_path):
+    path = tmp_path / "utf16.yaml"
+    path.write_bytes("name: x\ncases: []\n".encode("utf-16"))
+    with pytest.raises(SuiteError, match="looks like UTF-16 or UTF-32 text; save the suite file as UTF-8"):
+        load_suite(path)
+
+
+def test_latin1_suite_has_a_clear_error(tmp_path):
+    path = tmp_path / "latin1.yaml"
+    path.write_bytes("name: café\ncases: []\n".encode("latin-1"))
+    with pytest.raises(SuiteError, match=r"is not valid UTF-8 \(byte 0xe9 on line 1\)"):
+        load_suite(path)
+
+
+def test_utf8_bom_is_accepted(tmp_path):
+    path = tmp_path / "bom.yaml"
+    path.write_bytes(b"\xef\xbb\xbf" + MINIMAL.encode())
+    assert load_suite(path).name == "Minimal"
+
+
+def test_directory_instead_of_suite(tmp_path):
+    with pytest.raises(SuiteError, match="is a directory, expected a suite file"):
+        load_suite(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("url", "message"),
+    [
+        ('""', "must be an http(s) URL with a host, got an empty value"),
+        ("ftp://example.com", "must be an http(s) URL with a host"),
+        ("localhost:8000/v1", "must be an http(s) URL with a host"),
+        ("https://user:pw@example.com", "must not contain credentials"),
+        ("https://example.com/v1?x=1", "must not contain a query string"),
+    ],
+)
+def test_suite_base_url_is_validated(make_suite, url, message):
+    text = f"name: x\ndefaults:\n  base_url: {url}\ncases:\n  - {{id: a, prompt: hi, assert: [json_valid]}}\n"
+    with pytest.raises(SuiteError, match=re.escape(f"defaults: 'base_url' {message}")):
+        make_suite(text)

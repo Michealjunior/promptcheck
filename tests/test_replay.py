@@ -6,7 +6,13 @@ import pytest
 
 from promptcheck.errors import ConfigError, ProviderError
 from promptcheck.providers.base import Completion
-from promptcheck.providers.replay import FORMAT, RecordingProvider, ReplayProvider, load_recordings
+from promptcheck.providers.replay import (
+    FORMAT,
+    RecordingProvider,
+    ReplayProvider,
+    check_recording_target,
+    load_recordings,
+)
 from promptcheck.runner import run_suite
 from promptcheck.suite import load_suite
 
@@ -80,7 +86,7 @@ def test_invalid_files(tmp_path, content, message):
 
 
 def test_missing_file(tmp_path):
-    with pytest.raises(ConfigError, match="replay file not found"):
+    with pytest.raises(ConfigError, match=r"recording file not found \(create it with --record\)"):
         ReplayProvider(tmp_path / "missing.json")
 
 
@@ -137,3 +143,84 @@ def test_record_then_replay_round_trip(tmp_path, make_suite):
     replayed = run_suite(suite, ReplayProvider(path), cases=suite.cases[:2])
     assert [c.status for c in replayed.cases] == ["pass", "pass"]
     assert not any(c.warnings for c in replayed.cases)
+
+
+# ----------------------------------------------------------------- regression tests (QA)
+
+CONFLICTED = """{
+  "format": "promptcheck-recording/1",
+  "cases": {
+<<<<<<< HEAD
+    "a": [{"output": "one"}],
+=======
+    "a": [{"output": "two"}],
+>>>>>>> branch
+    "b": [{"output": "keep me"}]
+  }
+}
+"""
+
+
+def _recorded_run(make_suite):
+    suite = make_suite(
+        "name: R\ndefaults: {model: m}\ncases:\n  - {id: a, prompt: hi, assert: [{min_words: 1}]}\n"
+    )
+    recorder = RecordingProvider(FakeProvider({"a": "fresh output"}))
+    run = run_suite(suite, recorder)
+    return suite, recorder, {c.case.id: len(c.samples) for c in run.cases}
+
+
+def test_unparseable_recording_is_never_overwritten(tmp_path, make_suite):
+    # M5: --record into a file with merge-conflict markers used to wipe every other case.
+    path = tmp_path / "rec.json"
+    path.write_text(CONFLICTED, encoding="utf-8")
+    with pytest.raises(ConfigError, match=r"refusing to overwrite .* merge-conflict markers"):
+        check_recording_target(path)
+    suite, recorder, expected = _recorded_run(make_suite)
+    with pytest.raises(ConfigError, match="refusing to overwrite") as info:
+        recorder.save(path, suite_name=suite.name, expected=expected)
+    assert path.read_text(encoding="utf-8") == CONFLICTED, "the original file must be untouched"
+    fallback = tmp_path / "rec.new.json"
+    assert f"saved to {fallback}" in str(info.value)
+    assert json.loads(fallback.read_text())["cases"]["a"][0]["output"] == "fresh output"
+
+
+def test_recording_is_written_atomically(tmp_path, make_suite):
+    (tmp_path / "out").mkdir()
+    path = tmp_path / "out" / "rec.json"
+    path.write_text(json.dumps({"format": FORMAT, "cases": {"b": ["keep me"]}}), encoding="utf-8")
+    suite, recorder, expected = _recorded_run(make_suite)
+    recorder.save(path, suite_name=suite.name, expected=expected)
+    document = json.loads(path.read_text())
+    assert document["cases"]["b"] == ["keep me"]
+    assert document["cases"]["a"][0]["output"] == "fresh output"
+    assert sorted(p.name for p in path.parent.iterdir()) == ["rec.json"], "no temporary files are left behind"
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ('{"a": "one", "a": "two"}', "duplicate key 'a'"),
+        (json.dumps({"format": FORMAT, "cases": {"a": []}}), "case 'a' has an empty list of recordings"),
+    ],
+)
+def test_more_invalid_recordings(tmp_path, content, message):
+    path = tmp_path / "rec.json"
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(ConfigError, match=message):
+        load_recordings(path)
+
+
+def test_replay_pointing_at_a_directory(tmp_path):
+    with pytest.raises(ConfigError, match="is a directory, expected a recording file"):
+        ReplayProvider(tmp_path)
+
+
+def test_recording_encodings(tmp_path):
+    bom = tmp_path / "bom.json"
+    bom.write_bytes(b"\xef\xbb\xbf" + json.dumps({"a": "ok"}).encode())
+    assert ReplayProvider(bom).complete(request(case_id="a")).text == "ok"
+    latin = tmp_path / "latin.json"
+    latin.write_bytes('{"a": "café"}'.encode("latin-1"))
+    with pytest.raises(ConfigError, match="is not valid UTF-8"):
+        ReplayProvider(latin)

@@ -2,7 +2,7 @@
 
 **Regression tests for LLM prompts. Catch silent breakage before your users do.**
 
-[![CI](https://github.com/Michealjunior/promptcheck/actions/workflows/ci.yml/badge.svg)](https://github.com/Michealjunior/promptcheck/actions/workflows/ci.yml)
+[![Tests: 224 passing](https://img.shields.io/badge/tests-224%20passing-00ff9d.svg)](#testing)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-00ff9d.svg)](LICENSE)
 [![Python 3.10 | 3.11 | 3.12 | 3.13](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-00e1ff.svg)](pyproject.toml)
 [![Live site](https://img.shields.io/badge/live%20site-michealjunior.github.io%2Fpromptcheck-0a1218.svg)](https://michealjunior.github.io/promptcheck/)

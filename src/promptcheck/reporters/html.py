@@ -10,7 +10,7 @@ from promptcheck.files import atomic_write_text
 from promptcheck.reporters.common import duration, latency, percent
 from promptcheck.runner import ERROR, FAIL, PASS, CaseResult, RunResult, SampleResult
 
-REPO_URL = "https://github.com/Michealjunior/promptcheck"
+REPO_URL = "https://github.com/StarJnrDev/promptcheck"
 
 LOGO_SVG = (
     '<svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true" focusable="false">'

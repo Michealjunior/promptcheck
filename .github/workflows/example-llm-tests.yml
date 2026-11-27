@@ -6,7 +6,7 @@
 # on the job page.
 #
 # In your repository:
-#   * install with: pip install git+https://github.com/Michealjunior/promptcheck
+#   * install with: pip install git+https://github.com/StarJnrDev/promptcheck
 #   * point the run step at your own suite and recording file
 #   * drop --min-pass-rate so that any failing case fails the build
 name: LLM prompt tests (example)

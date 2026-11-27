@@ -25,7 +25,7 @@ from promptcheck.urls import validate_base_url
 EXIT_OK, EXIT_FAILED, EXIT_USAGE, EXIT_INTERRUPTED = 0, 1, 2, 130
 MAX_CONCURRENCY = 64
 MAX_TIMEOUT = 3600.0
-ISSUES_URL = "https://github.com/Michealjunior/promptcheck/issues"
+ISSUES_URL = "https://github.com/StarJnrDev/promptcheck/issues"
 
 
 def _rate(value: str) -> float:

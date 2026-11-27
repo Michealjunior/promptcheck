@@ -18,7 +18,7 @@ from typing import Any
 from promptcheck import __version__
 from promptcheck.errors import ProviderError, ProviderHTTPError
 
-USER_AGENT = f"promptcheck/{__version__} (+https://github.com/Michealjunior/promptcheck)"
+USER_AGENT = f"promptcheck/{__version__} (+https://github.com/StarJnrDev/promptcheck)"
 MAX_RETRIES = 10
 """Upper bound for ``--retries``."""
 

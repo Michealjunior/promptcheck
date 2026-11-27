@@ -289,7 +289,7 @@ footer { margin-top: 24px; padding: 32px 0 40px; border-top: 1px solid var(--lin
         <li class="hide-sm"><a href="#how">How it works</a></li>
         <li class="hide-sm"><a href="#faq">FAQ</a></li>
         <li class="hide-sm"><a href="sample-report.html">Sample report</a></li>
-        <li><a class="btn btn-ghost btn-sm" href="https://github.com/Michealjunior/promptcheck">GitHub</a></li>
+        <li><a class="btn btn-ghost btn-sm" href="https://github.com/StarJnrDev/promptcheck">GitHub</a></li>
       </ul>
     </nav>
   </header>
@@ -302,8 +302,8 @@ footer { margin-top: 24px; padding: 32px 0 40px; border-top: 1px solid var(--lin
         <p class="lede">Catch silent breakage before your users do.</p>
         <p class="sub">Describe what a good answer looks like in YAML, run it against OpenAI-compatible APIs or Anthropic, and replay recorded outputs in CI so every pull request is tested deterministically and for free.</p>
         <div class="install">
-          <code id="install-cmd"><span class="prompt">$ </span>uv tool install git+https://github.com/Michealjunior/promptcheck</code>
-          <button class="copy" type="button" data-copy="uv tool install git+https://github.com/Michealjunior/promptcheck" aria-describedby="copy-status">
+          <code id="install-cmd"><span class="prompt">$ </span>uv tool install git+https://github.com/StarJnrDev/promptcheck</code>
+          <button class="copy" type="button" data-copy="uv tool install git+https://github.com/StarJnrDev/promptcheck" aria-describedby="copy-status">
             <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="6.5" y="6.5" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M13.5 6.5V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v7A1.5 1.5 0 0 0 5 13.5h1.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
             <span>Copy</span>
           </button>
@@ -313,7 +313,7 @@ footer { margin-top: 24px; padding: 32px 0 40px; border-top: 1px solid var(--lin
           <a class="btn btn-primary" href="sample-report.html">View a sample report
             <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5 10h10m-4-4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </a>
-          <a class="btn btn-ghost" href="https://github.com/Michealjunior/promptcheck">Source on GitHub</a>
+          <a class="btn btn-ghost" href="https://github.com/StarJnrDev/promptcheck">Source on GitHub</a>
         </div>
       </div>
 
@@ -359,14 +359,14 @@ footer { margin-top: 24px; padding: 32px 0 40px; border-top: 1px solid var(--lin
 <span class="a">$</span> curl -LsSf https://astral.sh/uv/install.sh | sh
 
 <span class="c"># install promptcheck</span>
-<span class="a">$</span> uv tool install git+https://github.com/Michealjunior/promptcheck
+<span class="a">$</span> uv tool install git+https://github.com/StarJnrDev/promptcheck
 <span class="a">$</span> promptcheck --version</pre></div>
-          <p class="tip">Already use pipx? <code>pipx install git+https://github.com/Michealjunior/promptcheck</code> works too.</p>
+          <p class="tip">Already use pipx? <code>pipx install git+https://github.com/StarJnrDev/promptcheck</code> works too.</p>
         </div></li>
         <li><div>
           <h3>See it work, with no API key</h3>
           <p>The repository ships an example suite and recorded answers, so you can watch a full run for free. It finishes with <b>FAILED</b> on purpose: three cases are built to fail so you can see what a caught problem looks like.</p>
-          <div class="cmd"><pre tabindex="0"><span class="a">$</span> git clone https://github.com/Michealjunior/promptcheck
+          <div class="cmd"><pre tabindex="0"><span class="a">$</span> git clone https://github.com/StarJnrDev/promptcheck
 <span class="a">$</span> cd promptcheck
 <span class="a">$</span> promptcheck run examples/support-triage.yaml --replay examples/recordings.json --html report.html
 <span class="a">$</span> open report.html        # on Windows: start report.html</pre></div>
@@ -552,7 +552,7 @@ cases:
           </tbody>
         </table>
       </div>
-      <p class="note">The refusal checks use a documented, English-only phrase heuristic plus the provider’s own refusal signal when one is returned. The full reference is in the <a href="https://github.com/Michealjunior/promptcheck#writing-tests">README</a>.</p>
+      <p class="note">The refusal checks use a documented, English-only phrase heuristic plus the provider’s own refusal signal when one is returned. The full reference is in the <a href="https://github.com/StarJnrDev/promptcheck#writing-tests">README</a>.</p>
     </section>
 
     <section class="block" id="providers" aria-labelledby="providers-title">
@@ -584,7 +584,7 @@ cases:
       <div class="section-head">
         <p class="kicker">// Run it in CI</p>
         <h2 id="ci-title">A prompt change is a code change. Test it like one.</h2>
-        <p>Copy this job into your repository. The repository also ships a complete <a href="https://github.com/Michealjunior/promptcheck/blob/main/.github/workflows/example-llm-tests.yml">example workflow</a> that uploads the reports as artifacts.</p>
+        <p>Copy this job into your repository. The repository also ships a complete <a href="https://github.com/StarJnrDev/promptcheck/blob/main/.github/workflows/example-llm-tests.yml">example workflow</a> that uploads the reports as artifacts.</p>
       </div>
       <div class="ci">
         <div>
@@ -601,7 +601,7 @@ cases:
       <span class="y-p">-</span> <span class="y-k">uses</span><span class="y-p">:</span> <span class="y-s">actions/setup-python@v6</span>
         <span class="y-k">with</span><span class="y-p">:</span>
           <span class="y-k">python-version</span><span class="y-p">:</span> <span class="y-s">"3.12"</span>
-      <span class="y-p">-</span> <span class="y-k">run</span><span class="y-p">:</span> <span class="y-s">pip install git+https://github.com/Michealjunior/promptcheck</span>
+      <span class="y-p">-</span> <span class="y-k">run</span><span class="y-p">:</span> <span class="y-s">pip install git+https://github.com/StarJnrDev/promptcheck</span>
       <span class="y-p">-</span> <span class="y-k">run</span><span class="y-p">: &gt;-</span>
           <span class="y-s">promptcheck run prompts/suite.yaml</span>
           <span class="y-s">--replay prompts/recordings.json</span>
@@ -659,11 +659,11 @@ cases:
 
   <footer>
     <div class="foot">
-      <p class="built">Built by <a href="https://michealjunior.github.io">Ayeni Oluwaferanmi Micheal</a></p>
+      <p class="built">Built by <a href="https://starjnrdev.github.io">Ayeni Oluwaferanmi Micheal</a></p>
       <nav aria-label="Footer">
-        <a href="https://github.com/Michealjunior/promptcheck">Source on GitHub</a>
+        <a href="https://github.com/StarJnrDev/promptcheck">Source on GitHub</a>
         <a href="sample-report.html">Sample report</a>
-        <a href="https://github.com/Michealjunior/promptcheck/blob/main/LICENSE">MIT licence</a>
+        <a href="https://github.com/StarJnrDev/promptcheck/blob/main/LICENSE">MIT licence</a>
       </nav>
     </div>
   </footer>

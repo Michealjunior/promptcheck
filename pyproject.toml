@@ -37,8 +37,8 @@ promptcheck = "promptcheck.cli:entry"
 
 [project.urls]
 Homepage = "https://promptcheck-app.vercel.app/"
-Source = "https://github.com/Michealjunior/promptcheck"
-Issues = "https://github.com/Michealjunior/promptcheck/issues"
+Source = "https://github.com/StarJnrDev/promptcheck"
+Issues = "https://github.com/StarJnrDev/promptcheck/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/promptcheck"]

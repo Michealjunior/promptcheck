@@ -43,18 +43,18 @@ promptcheck is a small command-line tool that treats prompts like code:
 promptcheck needs Python 3.10 or newer. The easiest way to install it as a command is [uv](https://docs.astral.sh/uv/), which also fetches a suitable Python if yours is too old (macOS ships 3.9 and no `pip` command):
 
 ```bash
-uv tool install git+https://github.com/Michealjunior/promptcheck
+uv tool install git+https://github.com/StarJnrDev/promptcheck
 promptcheck --version
 ```
 
-Alternatives: `pipx install git+https://github.com/Michealjunior/promptcheck`, or inside a Python 3.10+ virtual environment, `python3 -m pip install git+https://github.com/Michealjunior/promptcheck`. To try it once without installing: `uvx --from git+https://github.com/Michealjunior/promptcheck promptcheck --help`.
+Alternatives: `pipx install git+https://github.com/StarJnrDev/promptcheck`, or inside a Python 3.10+ virtual environment, `python3 -m pip install git+https://github.com/StarJnrDev/promptcheck`. To try it once without installing: `uvx --from git+https://github.com/StarJnrDev/promptcheck promptcheck --help`.
 
 ### Try the example offline
 
 The repository ships a realistic suite for a helpdesk assistant and a recording of its outputs, so you can see a full run without an API key:
 
 ```bash
-git clone https://github.com/Michealjunior/promptcheck
+git clone https://github.com/StarJnrDev/promptcheck
 cd promptcheck
 promptcheck run examples/support-triage.yaml \
   --provider replay --replay examples/recordings.json \
@@ -286,7 +286,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install git+https://github.com/Michealjunior/promptcheck
+      - run: pip install git+https://github.com/StarJnrDev/promptcheck
       - run: >-
           promptcheck run prompts/suite.yaml
           --replay prompts/recordings.json
@@ -318,7 +318,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install git+https://github.com/Michealjunior/promptcheck
+      - run: pip install git+https://github.com/StarJnrDev/promptcheck
       - run: promptcheck run prompts/suite.yaml --junit reports/junit.xml
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -361,6 +361,6 @@ MIT © 2026 Ayeni Oluwaferanmi Micheal. See [LICENSE](LICENSE).
 
 **Ayeni Oluwaferanmi Micheal**, software engineer in AI evaluation and full-stack development, based in Ibadan, Nigeria.
 
-- Website: [michealjunior.github.io](https://michealjunior.github.io)
+- Website: [starjnrdev.github.io](https://starjnrdev.github.io)
 - LinkedIn: [linkedin.com/in/ayeni-oluwaferanmi-668ba6301](https://www.linkedin.com/in/ayeni-oluwaferanmi-668ba6301)
-- GitHub: [@Michealjunior](https://github.com/Michealjunior)
+- GitHub: [@StarJnrDev](https://github.com/StarJnrDev)
